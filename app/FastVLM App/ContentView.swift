@@ -47,6 +47,10 @@ struct ContentView: View {
     /// Rolling history of VLM emotion responses for change-detection prompting.
     @State private var emotionHistory: [String] = []
 
+    /// When enabled, draws arrows showing relative feature movement between
+    /// the oldest and newest ghost snapshots (robust to head movement).
+    @State private var showMovementArrows: Bool = false
+
     var toolbarItemPlacement: ToolbarItemPlacement {
         var placement: ToolbarItemPlacement = .navigation
         #if os(iOS)
@@ -118,6 +122,19 @@ struct ContentView: View {
                                     .font(.caption).monospacedDigit()
                                 Stepper("", value: $snapshotInterval, in: 0.5...5.0, step: 0.5)
                                     .labelsHidden()
+
+                                Spacer()
+
+                                Button {
+                                    showMovementArrows.toggle()
+                                } label: {
+                                    Image(systemName: showMovementArrows
+                                          ? "arrow.up.and.down.and.arrow.left.and.right"
+                                          : "arrow.up.and.down.and.arrow.left.and.right")
+                                        .foregroundStyle(showMovementArrows ? .blue : .gray)
+                                        .font(.title3)
+                                }
+                                .buttonStyle(.plain)
                             }
                             .onChange(of: maxGhostCount) { _, newMax in
                                 if displayFaceHistory.count > newMax {
@@ -148,8 +165,22 @@ struct ContentView: View {
                                 .overlay {
                                     if faceLandmarkModeEnabled,
                                        !displayFaceHistory.isEmpty {
-                                        FaceLandmarkOverlay(
-                                            history: displayFaceHistory)
+                                        if showMovementArrows {
+                                            FaceLandmarkOverlay(
+                                                history: [displayFaceHistory.last!])
+                                        } else {
+                                            FaceLandmarkOverlay(
+                                                history: displayFaceHistory)
+                                        }
+                                    }
+                                }
+                                .overlay {
+                                    if faceLandmarkModeEnabled,
+                                       showMovementArrows,
+                                       displayFaceHistory.count >= 2 {
+                                        FaceMovementArrowsOverlay(
+                                            oldSnapshot: displayFaceHistory.first!,
+                                            newSnapshot: displayFaceHistory.last!)
                                     }
                                 }
                                 .overlay(alignment: .top) {
@@ -984,6 +1015,186 @@ private struct FaceLandmarkOverlay: View {
 
     static let leftIris  = [468, 469, 470, 471, 472]
     static let rightIris = [473, 474, 475, 476, 477]
+}
+
+// MARK: - FaceMovementArrowsOverlay
+
+/// Draws arrows showing local feature movement between the oldest and newest
+/// ghost snapshots.  A similarity transform (translation + rotation + uniform
+/// scale) derived from the eye centres is used to map old landmarks into the
+/// new head pose, so only genuine feature displacement (brow raise, lip curl,
+/// cheek puff, etc.) produces arrows.  Arrows are suppressed entirely when
+/// head rotation or scale change exceeds safe thresholds.
+private struct FaceMovementArrowsOverlay: View {
+    let oldSnapshot: FaceLandmarkDisplayResult
+    let newSnapshot: FaceLandmarkDisplayResult
+
+    var body: some View {
+        Canvas { ctx, size in
+            draw(ctx: ctx, size: size)
+        }
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - Geometry helpers
+
+    private static func centroid(of indices: [Int], in face: [CGPoint]) -> CGPoint? {
+        let valid = indices.filter { $0 < face.count }
+        guard !valid.isEmpty else { return nil }
+        let sum = valid.reduce(CGPoint.zero) {
+            CGPoint(x: $0.x + face[$1].x, y: $0.y + face[$1].y)
+        }
+        return CGPoint(x: sum.x / CGFloat(valid.count),
+                       y: sum.y / CGFloat(valid.count))
+    }
+
+    private static func eyeCenters(_ face: [CGPoint]) -> (left: CGPoint, right: CGPoint)? {
+        guard let l = centroid(of: [33, 133], in: face),
+              let r = centroid(of: [362, 263], in: face) else { return nil }
+        return (l, r)
+    }
+
+    /// Builds a similarity transform that maps old eye centres → new eye
+    /// centres.  Returns nil if head rotation or scale change is too large
+    /// for reliable local-feature comparison.
+    private static func headTransform(
+        oldFace: [CGPoint], newFace: [CGPoint]
+    ) -> CGAffineTransform? {
+        guard let oldEyes = eyeCenters(oldFace),
+              let newEyes = eyeCenters(newFace) else { return nil }
+
+        let oldMid = CGPoint(x: (oldEyes.left.x + oldEyes.right.x) / 2,
+                             y: (oldEyes.left.y + oldEyes.right.y) / 2)
+        let newMid = CGPoint(x: (newEyes.left.x + newEyes.right.x) / 2,
+                             y: (newEyes.left.y + newEyes.right.y) / 2)
+
+        let oldDx = oldEyes.right.x - oldEyes.left.x
+        let oldDy = oldEyes.right.y - oldEyes.left.y
+        let newDx = newEyes.right.x - newEyes.left.x
+        let newDy = newEyes.right.y - newEyes.left.y
+
+        let oldDist = sqrt(oldDx * oldDx + oldDy * oldDy)
+        let newDist = sqrt(newDx * newDx + newDy * newDy)
+        guard oldDist > 1e-6, newDist > 1e-6 else { return nil }
+
+        let oldAngle = atan2(oldDy, oldDx)
+        let newAngle = atan2(newDy, newDx)
+        let dAngle = newAngle - oldAngle
+        let dScale = newDist / oldDist
+
+        // Suppress arrows for large head movements
+        if abs(dAngle) > 0.18 { return nil }       // >~10°
+        if dScale < 0.75 || dScale > 1.33 { return nil }  // >25% scale change
+
+        // Similarity transform: translate to origin → rotate → scale → translate
+        let cosA = cos(dAngle) * dScale
+        let sinA = sin(dAngle) * dScale
+
+        // M maps old normalised-coords to new normalised-coords:
+        //   p' = R*s*(p - oldMid) + newMid
+        let tx = newMid.x - cosA * oldMid.x + sinA * oldMid.y
+        let ty = newMid.y - sinA * oldMid.x - cosA * oldMid.y
+
+        return CGAffineTransform(a: cosA, b: sinA, c: -sinA, d: cosA, tx: tx, ty: ty)
+    }
+
+    /// Feature regions: (label, indices, color)
+    private static let featureGroups: [(String, [Int], Color)] = [
+        ("L.Brow",    [46, 53, 52, 65, 55, 107, 66, 105, 63, 70],              .brown),
+        ("R.Brow",    [276, 283, 282, 295, 285, 336, 296, 334, 293, 300],       .brown),
+        ("L.Cheek",   [116, 117, 118, 119, 100],                                .pink),
+        ("R.Cheek",   [345, 346, 347, 348, 329],                                .pink),
+        ("Upper Lip", [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308],       .red),
+        ("Lower Lip", [14, 87, 178, 88, 95, 317, 402, 318, 324],               .red),
+        ("Lip L",     [61, 146, 91],                                             .orange),
+        ("Lip R",     [291, 375, 321],                                           .orange),
+    ]
+
+    // MARK: - Drawing
+
+    private func draw(ctx: GraphicsContext, size: CGSize) {
+        guard let oldFace = oldSnapshot.landmarks.first,
+              let newFace = newSnapshot.landmarks.first,
+              oldFace.count >= 468, newFace.count >= 468 else { return }
+
+        let imgW = newSnapshot.imageSize.width
+        let imgH = newSnapshot.imageSize.height
+        guard imgW > 0, imgH > 0 else { return }
+
+        guard let xform = Self.headTransform(oldFace: oldFace, newFace: newFace) else {
+            return  // head moved too much — suppress arrows
+        }
+
+        // Inter-eye distance in the new frame for thresholding
+        guard let newEyes = Self.eyeCenters(newFace) else { return }
+        let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                            newEyes.right.y - newEyes.left.y)
+        guard eyeDist > 1e-6 else { return }
+
+        // resizeAspectFill mapping
+        let scaleX = size.width / imgW
+        let scaleY = size.height / imgH
+        let viewScale = max(scaleX, scaleY)
+        let scaledW = imgW * viewScale
+        let scaledH = imgH * viewScale
+        let offX = (scaledW - size.width) / 2
+        let offY = (scaledH - size.height) / 2
+
+        func toView(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x * scaledW - offX, y: p.y * scaledH - offY)
+        }
+
+        for (_, indices, color) in Self.featureGroups {
+            guard let oldCtr = Self.centroid(of: indices, in: oldFace),
+                  let newCtr = Self.centroid(of: indices, in: newFace) else { continue }
+
+            // Where the old centroid *would* be if only the head moved
+            let expected = oldCtr.applying(xform)
+
+            // Residual = actual new position − expected position
+            let dx = newCtr.x - expected.x
+            let dy = newCtr.y - expected.y
+
+            // Normalise by inter-eye distance; skip small movements
+            let normMag = hypot(dx, dy) / eyeDist
+            guard normMag > 0.02 else { continue }
+
+            let arrowScale: CGFloat = min(size.width, size.height) * 3.0
+            let origin = toView(newCtr)
+            let tip = CGPoint(x: origin.x + dx * arrowScale,
+                              y: origin.y + dy * arrowScale)
+
+            drawArrow(ctx: ctx, from: origin, to: tip,
+                      color: color, lineWidth: 2.5)
+        }
+    }
+
+    private func drawArrow(
+        ctx: GraphicsContext, from: CGPoint, to: CGPoint,
+        color: Color, lineWidth: CGFloat
+    ) {
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let len = hypot(dx, dy)
+        guard len > 3 else { return }
+
+        var shaft = Path()
+        shaft.move(to: from)
+        shaft.addLine(to: to)
+        ctx.stroke(shaft, with: .color(color), lineWidth: lineWidth)
+
+        let headLen: CGFloat = min(12, len * 0.35)
+        let angle = atan2(dy, dx)
+        let spread: CGFloat = .pi / 6
+        var head = Path()
+        head.move(to: to)
+        head.addLine(to: CGPoint(x: to.x - headLen * cos(angle - spread),
+                                 y: to.y - headLen * sin(angle - spread)))
+        head.addLine(to: CGPoint(x: to.x - headLen * cos(angle + spread),
+                                 y: to.y - headLen * sin(angle + spread)))
+        head.closeSubpath()
+        ctx.fill(head, with: .color(color))
+    }
 }
 
 #Preview {
