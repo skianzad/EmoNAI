@@ -167,7 +167,10 @@ struct ContentView: View {
                                        !displayFaceHistory.isEmpty {
                                         if showMovementArrows {
                                             FaceLandmarkOverlay(
-                                                history: [displayFaceHistory.last!])
+                                                history: [displayFaceHistory.last!],
+                                                referenceFace: displayFaceHistory.count >= 2
+                                                    ? displayFaceHistory.first!.landmarks.first
+                                                    : nil)
                                         } else {
                                             FaceLandmarkOverlay(
                                                 history: displayFaceHistory)
@@ -498,6 +501,18 @@ struct ContentView: View {
                     vlmLandmarkHistory[vlmLandmarkHistory.count - 1] = detection
                 }
 
+                // Only run VLM when arrows indicate meaningful movement
+                let arrowsOn = await MainActor.run { showMovementArrows }
+                if arrowsOn && vlmLandmarkHistory.count >= 2 {
+                    let hasMovement = FaceMovementArrowsOverlay.hasMeaningfulMovement(
+                        old: vlmLandmarkHistory.first!,
+                        new: vlmLandmarkHistory.last!)
+                    if !hasMovement {
+                        print("[VLM DEBUG] no meaningful movement — skipping VLM")
+                        continue
+                    }
+                }
+
                 guard let rendered = FaceLandmarkOverlay.renderToImage(
                     history: vlmLandmarkHistory
                 ) else {
@@ -535,10 +550,13 @@ struct ContentView: View {
             _ = await t.result
 
             if isFaceMode {
-                let emotion = await MainActor.run {
+                let rawEmotion = await MainActor.run {
                     model.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
-                print("[VLM DEBUG] response: \(emotion)")
+                print("[VLM DEBUG] response: \(rawEmotion)")
+                // Keep only first 3 words to prevent history bloat
+                let words = rawEmotion.split(separator: " ", maxSplits: 3)
+                let emotion = words.prefix(3).joined(separator: " ")
                 if !emotion.isEmpty {
                     await MainActor.run {
                         emotionHistory.append(emotion)
@@ -699,7 +717,9 @@ struct ContentView: View {
             let t = await model.generate(userInput)
             _ = await t.result
             if isFaceMode {
-                let emotion = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let raw = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let words = raw.split(separator: " ", maxSplits: 3)
+                let emotion = words.prefix(3).joined(separator: " ")
                 if !emotion.isEmpty {
                     emotionHistory.append(emotion)
                     if emotionHistory.count > 5 {
@@ -752,6 +772,7 @@ private func debugSaveImage(_ ciImage: CIImage, tag: String) {
 /// cropped when it doesn't match the 4:3 view ratio.
 private struct FaceLandmarkOverlay: View {
     let history: [FaceLandmarkDisplayResult]
+    var referenceFace: [CGPoint]? = nil
 
     var body: some View {
         Canvas { ctx, size in
@@ -760,22 +781,52 @@ private struct FaceLandmarkOverlay: View {
         .allowsHitTesting(false)
     }
 
+    // MARK: - Strain helpers
+
+    static func edgeDistance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        hypot(a.x - b.x, a.y - b.y)
+    }
+
+    /// Maps a distance ratio (current / reference) to an RGB color.
+    /// ratio < 1 → red (compression), ratio > 1 → blue (stretch), ~1 → gray.
+    static func strainColor(ratio: CGFloat) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+        let clamped = min(max(ratio, 0.7), 1.3)
+        let t = (clamped - 1.0) / 0.3  // -1…+1, 0 = no change
+        if t < 0 {
+            let intensity = -t  // 0…1
+            return (r: 0.5 + 0.5 * intensity, g: 0.5 * (1 - intensity), b: 0.5 * (1 - intensity))
+        } else {
+            let intensity = t   // 0…1
+            return (r: 0.5 * (1 - intensity), g: 0.5 * (1 - intensity), b: 0.5 + 0.5 * intensity)
+        }
+    }
+
+    static func strainSwiftUIColor(ratio: CGFloat) -> Color {
+        let c = strainColor(ratio: ratio)
+        return Color(red: Double(c.r), green: Double(c.g), blue: Double(c.b))
+    }
+
     // MARK: - Drawing
 
     private func draw(ctx: GraphicsContext, size: CGSize) {
         let count = history.count
         guard count > 0 else { return }
 
+        let ref: [CGPoint]? = referenceFace ?? (count > 1 ? history.first?.landmarks.first : nil)
+
         for (idx, snapshot) in history.enumerated() {
-            let age = CGFloat(idx + 1) / CGFloat(count)  // 0…1, newest = 1
-            let alpha = age * age  // quadratic fade: [0.04, 0.16, 0.36, 0.64, 1.0] for 5 items
-            drawSnapshot(ctx: ctx, size: size, result: snapshot, alpha: alpha)
+            let age = CGFloat(idx + 1) / CGFloat(count)
+            let alpha = age * age
+            let isNewest = idx == count - 1
+            drawSnapshot(ctx: ctx, size: size, result: snapshot, alpha: alpha,
+                         referenceFace: isNewest ? ref : nil)
         }
     }
 
     private func drawSnapshot(
         ctx: GraphicsContext, size: CGSize,
-        result: FaceLandmarkDisplayResult, alpha: CGFloat
+        result: FaceLandmarkDisplayResult, alpha: CGFloat,
+        referenceFace: [CGPoint]? = nil
     ) {
         let imgW = result.imageSize.width
         let imgH = result.imageSize.height
@@ -798,7 +849,8 @@ private struct FaceLandmarkOverlay: View {
                         y: p.y * scaledH - offY)
             }
 
-            drawConnections(ctx: ctx, face: face, toView: toView, alpha: alpha)
+            drawConnections(ctx: ctx, face: face, toView: toView, alpha: alpha,
+                            referenceFace: referenceFace)
 
             let dotRadius: CGFloat = alpha < 1 ? 1.0 : 1.5
             for i in 0..<min(face.count, 468) {
@@ -832,22 +884,45 @@ private struct FaceLandmarkOverlay: View {
         ctx: GraphicsContext,
         face: [CGPoint],
         toView: (CGPoint) -> CGPoint,
-        alpha: CGFloat
+        alpha: CGFloat,
+        referenceFace: [CGPoint]? = nil
     ) {
+        let lw: CGFloat = alpha < 1 ? 0.8 : 1.0
+
         func strokePath(
             _ indices: [Int], color: Color,
             lineWidth: CGFloat = 1.5, closed: Bool = false
         ) {
             guard indices.count >= 2,
                   indices.allSatisfy({ $0 < face.count }) else { return }
-            var path = Path()
-            path.move(to: toView(face[indices[0]]))
-            for i in indices.dropFirst() {
-                path.addLine(to: toView(face[i]))
+
+            let useStrain = referenceFace != nil
+                && indices.allSatisfy({ $0 < (referenceFace?.count ?? 0) })
+
+            if useStrain, let ref = referenceFace {
+                let allIdx = closed ? indices + [indices[0]] : indices
+                for seg in 0..<(allIdx.count - 1) {
+                    let iA = allIdx[seg], iB = allIdx[seg + 1]
+                    let curDist = Self.edgeDistance(face[iA], face[iB])
+                    let refDist = Self.edgeDistance(ref[iA], ref[iB])
+                    let ratio = refDist > 1e-8 ? curDist / refDist : 1.0
+                    let sc = Self.strainSwiftUIColor(ratio: ratio)
+                    var path = Path()
+                    path.move(to: toView(face[iA]))
+                    path.addLine(to: toView(face[iB]))
+                    ctx.stroke(path, with: .color(sc.opacity(0.9 * Double(alpha))),
+                               lineWidth: lineWidth * lw)
+                }
+            } else {
+                var path = Path()
+                path.move(to: toView(face[indices[0]]))
+                for i in indices.dropFirst() {
+                    path.addLine(to: toView(face[i]))
+                }
+                if closed { path.closeSubpath() }
+                ctx.stroke(path, with: .color(color.opacity(0.8 * alpha)),
+                           lineWidth: lineWidth * lw)
             }
-            if closed { path.closeSubpath() }
-            ctx.stroke(path, with: .color(color.opacity(0.8 * alpha)),
-                       lineWidth: lineWidth * (alpha < 1 ? 0.8 : 1.0))
         }
 
         strokePath(Self.faceOval,          color: .gray,   closed: true)
@@ -872,7 +947,10 @@ private struct FaceLandmarkOverlay: View {
 
     /// Rasterises the landmark ghost-trail into a 512×512 CIImage on a black
     /// background — the same visualisation the user sees on screen.
-    static func renderToImage(history: [FaceLandmarkDisplayResult]) -> CIImage? {
+    static func renderToImage(
+        history: [FaceLandmarkDisplayResult],
+        referenceFace: [CGPoint]? = nil
+    ) -> CIImage? {
         let count = history.count
         guard count > 0 else { return nil }
 
@@ -885,18 +963,19 @@ private struct FaceLandmarkOverlay: View {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        // Flip so (0,0) is top-left, matching MediaPipe normalised coords.
         ctx.translateBy(x: 0, y: CGFloat(side))
         ctx.scaleBy(x: 1, y: -1)
 
-        // White background
         ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
         ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+
+        let ref = referenceFace ?? (count > 1 ? history.first?.landmarks.first : nil)
 
         let s = CGFloat(side)
         for (idx, snapshot) in history.enumerated() {
             let age = CGFloat(idx + 1) / CGFloat(count)
             let alpha = age * age
+            let isNewest = idx == count - 1
 
             for face in snapshot.landmarks {
                 guard face.count >= 468 else { continue }
@@ -906,7 +985,8 @@ private struct FaceLandmarkOverlay: View {
                 }
 
                 drawCGConnections(ctx: ctx, face: face,
-                                  toPixel: toPixel, alpha: alpha)
+                                  toPixel: toPixel, alpha: alpha,
+                                  referenceFace: isNewest ? ref : nil)
 
                 let dotR: CGFloat = alpha < 1 ? 1.5 : 2.5
                 ctx.setFillColor(red: 0, green: 0, blue: 0.8, alpha: 0.6 * alpha)
@@ -940,8 +1020,11 @@ private struct FaceLandmarkOverlay: View {
 
     private static func drawCGConnections(
         ctx: CGContext, face: [CGPoint],
-        toPixel: (CGPoint) -> CGPoint, alpha: CGFloat
+        toPixel: (CGPoint) -> CGPoint, alpha: CGFloat,
+        referenceFace: [CGPoint]? = nil
     ) {
+        let lw: CGFloat = alpha < 1 ? 0.8 : 1.0
+
         func strokePath(
             _ indices: [Int],
             r: CGFloat, g: CGFloat, b: CGFloat,
@@ -949,16 +1032,38 @@ private struct FaceLandmarkOverlay: View {
         ) {
             guard indices.count >= 2,
                   indices.allSatisfy({ $0 < face.count }) else { return }
-            ctx.setStrokeColor(red: r, green: g, blue: b,
-                               alpha: 0.8 * alpha)
-            ctx.setLineWidth(lineWidth * (alpha < 1 ? 0.8 : 1.0))
-            ctx.beginPath()
-            ctx.move(to: toPixel(face[indices[0]]))
-            for i in indices.dropFirst() {
-                ctx.addLine(to: toPixel(face[i]))
+
+            let useStrain = referenceFace != nil
+                && indices.allSatisfy({ $0 < (referenceFace?.count ?? 0) })
+
+            if useStrain, let ref = referenceFace {
+                let allIdx = closed ? indices + [indices[0]] : indices
+                for seg in 0..<(allIdx.count - 1) {
+                    let iA = allIdx[seg], iB = allIdx[seg + 1]
+                    let curDist = edgeDistance(face[iA], face[iB])
+                    let refDist = edgeDistance(ref[iA], ref[iB])
+                    let ratio = refDist > 1e-8 ? curDist / refDist : 1.0
+                    let sc = strainColor(ratio: ratio)
+                    ctx.setStrokeColor(red: sc.r, green: sc.g, blue: sc.b,
+                                       alpha: 0.9 * alpha)
+                    ctx.setLineWidth(lineWidth * lw)
+                    ctx.beginPath()
+                    ctx.move(to: toPixel(face[iA]))
+                    ctx.addLine(to: toPixel(face[iB]))
+                    ctx.strokePath()
+                }
+            } else {
+                ctx.setStrokeColor(red: r, green: g, blue: b,
+                                   alpha: 0.8 * alpha)
+                ctx.setLineWidth(lineWidth * lw)
+                ctx.beginPath()
+                ctx.move(to: toPixel(face[indices[0]]))
+                for i in indices.dropFirst() {
+                    ctx.addLine(to: toPixel(face[i]))
+                }
+                if closed { ctx.closePath() }
+                ctx.strokePath()
             }
-            if closed { ctx.closePath() }
-            ctx.strokePath()
         }
 
         strokePath(faceOval,          r: 0.5,  g: 0.5,  b: 0.5,  closed: true)
@@ -1100,15 +1205,56 @@ private struct FaceMovementArrowsOverlay: View {
 
     /// Feature regions: (label, indices, color)
     private static let featureGroups: [(String, [Int], Color)] = [
-        ("L.Brow",    [46, 53, 52, 65, 55, 107, 66, 105, 63, 70],              .brown),
-        ("R.Brow",    [276, 283, 282, 295, 285, 336, 296, 334, 293, 300],       .brown),
-        ("L.Cheek",   [116, 117, 118, 119, 100],                                .pink),
-        ("R.Cheek",   [345, 346, 347, 348, 329],                                .pink),
-        ("Upper Lip", [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308],       .red),
-        ("Lower Lip", [14, 87, 178, 88, 95, 317, 402, 318, 324],               .red),
-        ("Lip L",     [61, 146, 91],                                             .orange),
-        ("Lip R",     [291, 375, 321],                                           .orange),
+        // Eyebrows
+        ("L.Brow",     [46, 53, 52, 65, 55, 107, 66, 105, 63, 70],              .brown),
+        ("R.Brow",     [276, 283, 282, 295, 285, 336, 296, 334, 293, 300],       .brown),
+        // Glabella (between eyebrows) — frown/furrow indicator
+        ("Glabella",   [9, 151, 108, 69, 104, 68, 71],                           .purple),
+        // Cheeks
+        ("L.Cheek",    [116, 117, 118, 119, 100, 126, 142, 36, 205],             .pink),
+        ("R.Cheek",    [345, 346, 347, 348, 329, 355, 371, 266, 425],            .pink),
+        // Lips
+        ("Upper Lip",  [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308],      .red),
+        ("Lower Lip",  [14, 87, 178, 88, 95, 317, 402, 318, 324],               .red),
+        ("Lip L",      [61, 146, 91],                                             .orange),
+        ("Lip R",      [291, 375, 321],                                           .orange),
+        // Chin
+        ("Chin",       [152, 377, 400, 378, 379, 365, 397, 288, 361, 150, 149, 176, 148], .indigo),
+        // Jaw sides
+        ("L.Jaw",      [172, 58, 132, 93, 234, 127],                             .teal),
+        ("R.Jaw",      [401, 288, 361, 323, 454, 356],                           .teal),
     ]
+
+    // MARK: - Movement detection (used to gate VLM inference)
+
+    /// Returns true if at least one feature shows meaningful local movement
+    /// between two snapshots (i.e. arrows would be drawn).
+    static func hasMeaningfulMovement(
+        old: FaceLandmarkDisplayResult,
+        new: FaceLandmarkDisplayResult
+    ) -> Bool {
+        guard let oldFace = old.landmarks.first,
+              let newFace = new.landmarks.first,
+              oldFace.count >= 468, newFace.count >= 468 else { return false }
+
+        guard let xform = headTransform(oldFace: oldFace, newFace: newFace) else {
+            return false
+        }
+        guard let newEyes = eyeCenters(newFace) else { return false }
+        let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                            newEyes.right.y - newEyes.left.y)
+        guard eyeDist > 1e-6 else { return false }
+
+        for (_, indices, _) in featureGroups {
+            guard let oldCtr = centroid(of: indices, in: oldFace),
+                  let newCtr = centroid(of: indices, in: newFace) else { continue }
+            let expected = oldCtr.applying(xform)
+            let dx = newCtr.x - expected.x
+            let dy = newCtr.y - expected.y
+            if hypot(dx, dy) / eyeDist > 0.02 { return true }
+        }
+        return false
+    }
 
     // MARK: - Drawing
 
