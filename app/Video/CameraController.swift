@@ -175,6 +175,9 @@ public class CameraController: NSObject {
         }
         captureSession.addInput(videoDeviceInput)
 
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+        ]
         videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "sampleBufferQueue"))
         captureSession.addOutput(videoOutput)
         captureSession.sessionPreset = AVCaptureSession.Preset.hd1920x1080

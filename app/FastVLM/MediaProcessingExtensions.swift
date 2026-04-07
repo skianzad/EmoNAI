@@ -82,26 +82,39 @@ enum MediaProcessingExtensions {
 
     // version of function from https://github.com/ml-explore/mlx-swift-examples/pull/222
     public static func resampleBicubic(_ image: CIImage, to size: CGSize) -> CIImage {
-        // Create a bicubic scale filter
+        // Normalise to origin (0,0) so the post-scale crop lands correctly.
+        // CIBicubicScaleTransform scales pixel positions in the global
+        // coordinate space; a non-zero origin shifts all content away from
+        // (0,0) and the crop to exactRect would miss it.
+        let origin = image.extent.origin
+        let normalised: CIImage = (origin.x == 0 && origin.y == 0) ? image :
+            image.transformed(by: CGAffineTransform(
+                translationX: -origin.x, y: -origin.y))
 
-        let yScale = size.height / image.extent.height
-        let xScale = size.width / image.extent.width
+        let yScale = size.height / normalised.extent.height
+        let xScale = size.width  / normalised.extent.width
 
         let filter = CIFilter.bicubicScaleTransform()
-        filter.inputImage = image
+        filter.inputImage = normalised
         filter.scale = Float(yScale)
         filter.aspectRatio = Float(xScale / yScale)
         let scaledImage = filter.outputImage!
 
-        // Create a rect with the exact dimensions we want
-        let exactRect = CGRect(
-            x: 0,
-            y: 0,
-            width: size.width,
-            height: size.height
-        )
-        // Crop to ensure exact dimensions
-        return scaledImage.cropped(to: exactRect)
+        let exactRect = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        let cropped = scaledImage.cropped(to: exactRect)
+
+        // CIBicubicScaleTransform preserves the input extent when upscaling
+        // (pixels move but the declared extent stays the same), so the crop
+        // above is a no-op when the input is smaller than the target.
+        // Detect this and fall back to an affine transform, which correctly
+        // updates the extent.  Quality is equivalent for VLM input at this
+        // scale range.
+        if cropped.extent.width < size.width - 1 || cropped.extent.height < size.height - 1 {
+            return normalised
+                .transformed(by: CGAffineTransform(scaleX: xScale, y: yScale))
+                .cropped(to: exactRect)
+        }
+        return cropped
     }
 
     static let context = CIContext()
