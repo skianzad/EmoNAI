@@ -37,8 +37,15 @@ struct ContentView: View {
     @State private var faceLandmarkModeEnabled: Bool = false
     private let faceLandmarker = FaceLandmarkerService()
 
-    /// Latest MediaPipe face result used to render the landmark overlay on the video.
-    @State private var displayFaceResult: FaceLandmarkDisplayResult? = nil
+    /// Rolling history of landmark snapshots for the ghost trail.
+    @State private var displayFaceHistory: [FaceLandmarkDisplayResult] = []
+    /// How many ghost snapshots to keep (user-adjustable, 1–10).
+    @State private var maxGhostCount: Int = 5
+    /// Seconds between freezing a new ghost snapshot (user-adjustable).
+    @State private var snapshotInterval: Double = 1.0
+
+    /// Rolling history of VLM emotion responses for change-detection prompting.
+    @State private var emotionHistory: [String] = []
 
     var toolbarItemPlacement: ToolbarItemPlacement {
         var placement: ToolbarItemPlacement = .navigation
@@ -86,10 +93,37 @@ struct ContentView: View {
                                 .font(.subheadline)
                         }
                         .onChange(of: faceLandmarkModeEnabled) { _, enabled in
-                            if !enabled { displayFaceResult = nil }
+                            if !enabled {
+                                displayFaceHistory.removeAll()
+                                emotionHistory.removeAll()
+                                model.maxTokens = 240
+                            }
                             if enabled {
-                                prompt = "What is this person's facial expression?"
-                                promptSuffix = "Output only one or two words."
+                                prompt = "Name the exact emotion on this face and any head tilt or turn."
+                                promptSuffix = "Format: <emotion>, <movement>. Example: happy, tilting left. Do not describe the image."
+                                model.maxTokens = 25
+                            }
+                        }
+
+                        if faceLandmarkModeEnabled {
+                            HStack {
+                                Text("Ghosts: \(maxGhostCount)")
+                                    .font(.caption).monospacedDigit()
+                                Stepper("", value: $maxGhostCount, in: 1...10)
+                                    .labelsHidden()
+
+                                Spacer()
+
+                                Text("Interval: \(String(format: "%.1fs", snapshotInterval))")
+                                    .font(.caption).monospacedDigit()
+                                Stepper("", value: $snapshotInterval, in: 0.5...5.0, step: 0.5)
+                                    .labelsHidden()
+                            }
+                            .onChange(of: maxGhostCount) { _, newMax in
+                                if displayFaceHistory.count > newMax {
+                                    displayFaceHistory.removeFirst(
+                                        displayFaceHistory.count - newMax)
+                                }
                             }
                         }
 
@@ -107,9 +141,15 @@ struct ContentView: View {
                                 .frame(maxWidth: 750)
                                 #endif
                                 .overlay {
+                                    if faceLandmarkModeEnabled {
+                                        Color.white
+                                    }
+                                }
+                                .overlay {
                                     if faceLandmarkModeEnabled,
-                                       let result = displayFaceResult {
-                                        FaceLandmarkOverlay(result: result)
+                                       !displayFaceHistory.isEmpty {
+                                        FaceLandmarkOverlay(
+                                            history: displayFaceHistory)
                                     }
                                 }
                                 .overlay(alignment: .top) {
@@ -291,13 +331,13 @@ struct ContentView: View {
                             }
                             Button("Face landmarks — emotion") {
                                 faceLandmarkModeEnabled = true
-                                prompt = "Describe the emotion shown in this face."
-                                promptSuffix = "Output only one or two words."
+                                prompt = "Name the exact emotion on this face."
+                                promptSuffix = "One or two words only. Example: happy. Do not describe the image."
                             }
-                            Button("Face landmarks — describe") {
+                            Button("Face landmarks — movement") {
                                 faceLandmarkModeEnabled = true
-                                prompt = "Describe the face shown in this image."
-                                promptSuffix = "Output should be brief, about 10 words or less."
+                                prompt = "Name the exact emotion on this face and any head tilt or turn."
+                                promptSuffix = "Format: <emotion>, <movement>. Example: happy, tilting left. Do not describe the image."
                             }
                             Button("Read text") {
                                 prompt = "What is written in this image?"
@@ -398,27 +438,85 @@ struct ContentView: View {
     }
 
     func analyzeVideoFrames(_ frames: AsyncStream<CVImageBuffer>) async {
+        var vlmLandmarkHistory: [FaceLandmarkDisplayResult] = []
+        var lastVLMSnapshotDate = Date.distantPast
+
         for await frame in frames {
             let imageForVLM: CIImage
+            let isFaceMode = await MainActor.run { faceLandmarkModeEnabled }
+            let currentMaxGhosts = await MainActor.run { maxGhostCount }
+            let currentInterval = await MainActor.run { snapshotInterval }
 
-            if faceLandmarkModeEnabled {
-                guard let result = faceLandmarker.detectAndCrop(in: frame) else {
-                    // No face detected — skip this frame.
+            if isFaceMode {
+                guard let detection = faceLandmarker.detectObservation(in: frame) else {
+                    print("[VLM DEBUG] no face detected — skipping")
                     continue
                 }
-                imageForVLM = result.croppedImage
+
+                let now = Date()
+                let shouldFreeze = now.timeIntervalSince(lastVLMSnapshotDate) >= currentInterval
+                if shouldFreeze { lastVLMSnapshotDate = now }
+
+                if shouldFreeze || vlmLandmarkHistory.isEmpty {
+                    vlmLandmarkHistory.append(detection)
+                    if vlmLandmarkHistory.count > currentMaxGhosts {
+                        vlmLandmarkHistory.removeFirst(
+                            vlmLandmarkHistory.count - currentMaxGhosts)
+                    }
+                } else {
+                    vlmLandmarkHistory[vlmLandmarkHistory.count - 1] = detection
+                }
+
+                guard let rendered = FaceLandmarkOverlay.renderToImage(
+                    history: vlmLandmarkHistory
+                ) else {
+                    print("[VLM DEBUG] renderToImage failed")
+                    continue
+                }
+                imageForVLM = rendered
+                print("[VLM DEBUG] rendered \(vlmLandmarkHistory.count) ghosts, extent: \(rendered.extent)")
+                debugSaveImage(rendered, tag: "vlm_input")
             } else {
+                vlmLandmarkHistory.removeAll()
                 imageForVLM = CIImage(cvPixelBuffer: frame)
             }
 
+            let fullPrompt: String
+            if isFaceMode {
+                let emotions = await MainActor.run { emotionHistory }
+                if !emotions.isEmpty {
+                    let prev = emotions.joined(separator: " → ")
+                    fullPrompt = "\(prompt) Previous readings were: [\(prev)]. State the current emotion, movement, and whether it differs from previous. \(promptSuffix)"
+                } else {
+                    fullPrompt = "\(prompt) \(promptSuffix)"
+                }
+                print("[VLM DEBUG] prompt: \(fullPrompt)")
+            } else {
+                fullPrompt = "\(prompt) \(promptSuffix)"
+            }
+
             let userInput = UserInput(
-                prompt: .text("\(prompt) \(promptSuffix)"),
+                prompt: .text(fullPrompt),
                 images: [.ciImage(imageForVLM)]
             )
-            
-            // generate output for a frame and wait for generation to complete
+
             let t = await model.generate(userInput)
             _ = await t.result
+
+            if isFaceMode {
+                let emotion = await MainActor.run {
+                    model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                print("[VLM DEBUG] response: \(emotion)")
+                if !emotion.isEmpty {
+                    await MainActor.run {
+                        emotionHistory.append(emotion)
+                        if emotionHistory.count > 5 {
+                            emotionHistory.removeFirst(emotionHistory.count - 5)
+                        }
+                    }
+                }
+            }
 
             do {
                 try await Task.sleep(for: FRAME_DELAY)
@@ -426,18 +524,39 @@ struct ContentView: View {
         }
     }
 
-    /// Runs MediaPipe face-landmark detection on display frames and updates
-    /// `displayFaceResult` for the overlay.  Drops frames automatically
-    /// when detection is slower than the camera frame rate (bufferingNewest(1)).
+    /// Runs MediaPipe face-landmark detection on display frames and maintains
+    /// a rolling history for the ghost-trail overlay.  A new ghost is frozen
+    /// every `snapshotInterval` seconds; the newest entry is live-updated
+    /// every frame.
     func detectDisplayLandmarks(_ frames: AsyncStream<CVImageBuffer>) async {
+        var lastSnapshotDate = Date.distantPast
+
         for await frame in frames {
-            let result: FaceLandmarkDisplayResult?
-            if faceLandmarkModeEnabled {
-                result = faceLandmarker.detectObservation(in: frame)
-            } else {
-                result = nil
+            guard faceLandmarkModeEnabled,
+                  let result = faceLandmarker.detectObservation(in: frame) else {
+                continue
             }
-            await MainActor.run { displayFaceResult = result }
+
+            let now = Date()
+            let interval = await MainActor.run { snapshotInterval }
+            let shouldFreeze = now.timeIntervalSince(lastSnapshotDate) >= interval
+
+            if shouldFreeze {
+                lastSnapshotDate = now
+            }
+
+            await MainActor.run {
+                let maxCount = maxGhostCount
+                if shouldFreeze || displayFaceHistory.isEmpty {
+                    displayFaceHistory.append(result)
+                    if displayFaceHistory.count > maxCount {
+                        displayFaceHistory.removeFirst(
+                            displayFaceHistory.count - maxCount)
+                    }
+                } else {
+                    displayFaceHistory[displayFaceHistory.count - 1] = result
+                }
+            }
         }
     }
 
@@ -504,46 +623,104 @@ struct ContentView: View {
     }
 
     /// Perform FastVLM inference on a single frame.
-    /// - Parameter frame: The frame to analyze.
     func processSingleFrame(_ frame: CVImageBuffer) {
-        // Reset Response UI (show spinner)
         Task { @MainActor in
             model.output = ""
         }
 
+        let isFaceMode = faceLandmarkModeEnabled
         let imageForVLM: CIImage
-        if faceLandmarkModeEnabled,
-           let result = faceLandmarker.detectAndCrop(in: frame) {
-            imageForVLM = result.croppedImage
+        if isFaceMode {
+            // Use the display history which is already populated by detectDisplayLandmarks
+            let history = displayFaceHistory
+            if let rendered = FaceLandmarkOverlay.renderToImage(history: history) {
+                imageForVLM = rendered
+                debugSaveImage(rendered, tag: "vlm_input_single")
+                print("[VLM DEBUG single] rendered \(history.count) ghosts")
+            } else if let detection = faceLandmarker.detectObservation(in: frame) {
+                // Fallback: render just the current detection
+                if let rendered = FaceLandmarkOverlay.renderToImage(history: [detection]) {
+                    imageForVLM = rendered
+                } else {
+                    imageForVLM = CIImage(cvPixelBuffer: frame)
+                }
+            } else {
+                imageForVLM = CIImage(cvPixelBuffer: frame)
+            }
         } else {
-            // No face detected or mode disabled — use the full frame.
             imageForVLM = CIImage(cvPixelBuffer: frame)
         }
 
-        // Construct request to model
+        let fullPrompt: String
+        if isFaceMode && !emotionHistory.isEmpty {
+            let prev = emotionHistory.joined(separator: " → ")
+            fullPrompt = "\(prompt) Previous readings were: [\(prev)]. State the current emotion, movement, and whether it differs from previous. \(promptSuffix)"
+        } else {
+            fullPrompt = "\(prompt) \(promptSuffix)"
+        }
+
         let userInput = UserInput(
-            prompt: .text("\(prompt) \(promptSuffix)"),
+            prompt: .text(fullPrompt),
             images: [.ciImage(imageForVLM)]
         )
 
-        // Post request to FastVLM
         Task {
-            await model.generate(userInput)
+            let t = await model.generate(userInput)
+            _ = await t.result
+            if isFaceMode {
+                let emotion = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !emotion.isEmpty {
+                    emotionHistory.append(emotion)
+                    if emotionHistory.count > 5 {
+                        emotionHistory.removeFirst(emotionHistory.count - 5)
+                    }
+                }
+            }
         }
+    }
+}
+
+// MARK: - Debug helpers
+
+/// Saves a CIImage to Desktop (macOS) or Documents (iOS) for inspection.
+private func debugSaveImage(_ ciImage: CIImage, tag: String) {
+    let ctx = CIContext()
+    guard let cgImage = ctx.createCGImage(ciImage, from: ciImage.extent) else {
+        print("[VLM DEBUG] failed to create CGImage")
+        return
+    }
+
+    #if os(iOS)
+    let uiImage = UIImage(cgImage: cgImage)
+    guard let data = uiImage.pngData() else { return }
+    let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        ?? FileManager.default.temporaryDirectory
+    #else
+    let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    guard let tiff = nsImage.tiffRepresentation,
+          let rep = NSBitmapImageRep(data: tiff),
+          let data = rep.representation(using: .png, properties: [:]) else { return }
+    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+    #endif
+
+    let url = dir.appendingPathComponent("\(tag).png")
+    do {
+        try data.write(to: url)
+        print("[VLM DEBUG] saved → \(url.path) (\(cgImage.width)×\(cgImage.height))")
+    } catch {
+        print("[VLM DEBUG] save failed: \(error)")
     }
 }
 
 // MARK: - FaceLandmarkOverlay
 
-/// Draws MediaPipe's 478-point face mesh over the video view.
+/// Draws up to 5 face-mesh snapshots with a ghost-trail effect.
+/// Newest snapshot is fully bright; older ones fade out progressively.
 ///
-/// Coordinate mapping accounts for `resizeAspectFill` —  the image may be
+/// Coordinate mapping accounts for `resizeAspectFill` — the image may be
 /// cropped when it doesn't match the 4:3 view ratio.
-///
-/// MediaPipe normalised coordinates use a **top-left** origin, matching
-/// SwiftUI's Canvas coordinate system (no Y-flip needed).
 private struct FaceLandmarkOverlay: View {
-    let result: FaceLandmarkDisplayResult
+    let history: [FaceLandmarkDisplayResult]
 
     var body: some View {
         Canvas { ctx, size in
@@ -555,11 +732,24 @@ private struct FaceLandmarkOverlay: View {
     // MARK: - Drawing
 
     private func draw(ctx: GraphicsContext, size: CGSize) {
+        let count = history.count
+        guard count > 0 else { return }
+
+        for (idx, snapshot) in history.enumerated() {
+            let age = CGFloat(idx + 1) / CGFloat(count)  // 0…1, newest = 1
+            let alpha = age * age  // quadratic fade: [0.04, 0.16, 0.36, 0.64, 1.0] for 5 items
+            drawSnapshot(ctx: ctx, size: size, result: snapshot, alpha: alpha)
+        }
+    }
+
+    private func drawSnapshot(
+        ctx: GraphicsContext, size: CGSize,
+        result: FaceLandmarkDisplayResult, alpha: CGFloat
+    ) {
         let imgW = result.imageSize.width
         let imgH = result.imageSize.height
         guard imgW > 0, imgH > 0 else { return }
 
-        // resizeAspectFill: scale until the image *covers* the view.
         let scaleX = size.width  / imgW
         let scaleY = size.height / imgH
         let scale  = max(scaleX, scaleY)
@@ -577,29 +767,29 @@ private struct FaceLandmarkOverlay: View {
                         y: p.y * scaledH - offY)
             }
 
-            // Feature connections
-            drawConnections(ctx: ctx, face: face, toView: toView)
+            drawConnections(ctx: ctx, face: face, toView: toView, alpha: alpha)
 
-            // All 468 base landmarks as small dots
+            let dotRadius: CGFloat = alpha < 1 ? 1.0 : 1.5
             for i in 0..<min(face.count, 468) {
                 let vp = toView(face[i])
                 ctx.fill(
-                    Path(ellipseIn: CGRect(x: vp.x - 1.5, y: vp.y - 1.5,
-                                           width: 3, height: 3)),
-                    with: .color(.cyan.opacity(0.6)))
+                    Path(ellipseIn: CGRect(
+                        x: vp.x - dotRadius, y: vp.y - dotRadius,
+                        width: dotRadius * 2, height: dotRadius * 2)),
+                    with: .color(.blue.opacity(0.6 * alpha)))
             }
 
-            // Iris points — larger, brighter
             if face.count >= 478 {
+                let r: CGFloat = alpha < 1 ? 2.5 : 4
                 for i in 468..<478 {
                     let vp = toView(face[i])
-                    let r: CGFloat = 4
                     let rect = CGRect(x: vp.x - r, y: vp.y - r,
                                       width: 2 * r, height: 2 * r)
                     ctx.fill(Path(ellipseIn: rect),
-                             with: .color(.white.opacity(0.9)))
+                             with: .color(.black.opacity(0.8 * alpha)))
                     ctx.stroke(Path(ellipseIn: rect),
-                               with: .color(.cyan), lineWidth: 1.5)
+                               with: .color(.blue.opacity(alpha)),
+                               lineWidth: 1.5)
                 }
             }
         }
@@ -610,7 +800,8 @@ private struct FaceLandmarkOverlay: View {
     private func drawConnections(
         ctx: GraphicsContext,
         face: [CGPoint],
-        toView: (CGPoint) -> CGPoint
+        toView: (CGPoint) -> CGPoint,
+        alpha: CGFloat
     ) {
         func strokePath(
             _ indices: [Int], color: Color,
@@ -624,25 +815,136 @@ private struct FaceLandmarkOverlay: View {
                 path.addLine(to: toView(face[i]))
             }
             if closed { path.closeSubpath() }
-            ctx.stroke(path, with: .color(color.opacity(0.8)),
-                       lineWidth: lineWidth)
+            ctx.stroke(path, with: .color(color.opacity(0.8 * alpha)),
+                       lineWidth: lineWidth * (alpha < 1 ? 0.8 : 1.0))
         }
 
-        strokePath(Self.faceOval,          color: .yellow, closed: true)
-        strokePath(Self.leftEye,           color: .cyan,   closed: true)
-        strokePath(Self.rightEye,          color: .cyan,   closed: true)
-        strokePath(Self.leftEyebrowUpper,  color: .yellow)
-        strokePath(Self.leftEyebrowLower,  color: .yellow)
-        strokePath(Self.rightEyebrowUpper, color: .yellow)
-        strokePath(Self.rightEyebrowLower, color: .yellow)
-        strokePath(Self.lipsOuter,         color: .orange, closed: true)
-        strokePath(Self.lipsInner,         color: .orange, lineWidth: 1, closed: true)
-        strokePath(Self.noseBridge,        color: .yellow)
-        strokePath(Self.noseBottom,        color: .yellow)
+        strokePath(Self.faceOval,          color: .gray,   closed: true)
+        strokePath(Self.leftEye,           color: .blue,   closed: true)
+        strokePath(Self.rightEye,          color: .blue,   closed: true)
+        strokePath(Self.leftEyebrowUpper,  color: .brown)
+        strokePath(Self.leftEyebrowLower,  color: .brown)
+        strokePath(Self.rightEyebrowUpper, color: .brown)
+        strokePath(Self.rightEyebrowLower, color: .brown)
+        strokePath(Self.lipsOuter,         color: .red,    closed: true)
+        strokePath(Self.lipsInner,         color: .red,    lineWidth: 1, closed: true)
+        strokePath(Self.noseBridge,        color: .gray)
+        strokePath(Self.noseBottom,        color: .gray)
 
         if face.count >= 478 {
-            strokePath(Self.leftIris,  color: .white, lineWidth: 1.5, closed: true)
-            strokePath(Self.rightIris, color: .white, lineWidth: 1.5, closed: true)
+            strokePath(Self.leftIris,  color: .black, lineWidth: 1.5, closed: true)
+            strokePath(Self.rightIris, color: .black, lineWidth: 1.5, closed: true)
+        }
+    }
+
+    // MARK: - Render to CIImage (for VLM input)
+
+    /// Rasterises the landmark ghost-trail into a 512×512 CIImage on a black
+    /// background — the same visualisation the user sees on screen.
+    static func renderToImage(history: [FaceLandmarkDisplayResult]) -> CIImage? {
+        let count = history.count
+        guard count > 0 else { return nil }
+
+        let side = 512
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: side, height: side,
+            bitsPerComponent: 8, bytesPerRow: side * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        // Flip so (0,0) is top-left, matching MediaPipe normalised coords.
+        ctx.translateBy(x: 0, y: CGFloat(side))
+        ctx.scaleBy(x: 1, y: -1)
+
+        // White background
+        ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+
+        let s = CGFloat(side)
+        for (idx, snapshot) in history.enumerated() {
+            let age = CGFloat(idx + 1) / CGFloat(count)
+            let alpha = age * age
+
+            for face in snapshot.landmarks {
+                guard face.count >= 468 else { continue }
+
+                func toPixel(_ p: CGPoint) -> CGPoint {
+                    CGPoint(x: p.x * s, y: p.y * s)
+                }
+
+                drawCGConnections(ctx: ctx, face: face,
+                                  toPixel: toPixel, alpha: alpha)
+
+                let dotR: CGFloat = alpha < 1 ? 1.5 : 2.5
+                ctx.setFillColor(red: 0, green: 0, blue: 0.8, alpha: 0.6 * alpha)
+                for i in 0..<min(face.count, 468) {
+                    let p = toPixel(face[i])
+                    ctx.fillEllipse(in: CGRect(x: p.x - dotR, y: p.y - dotR,
+                                               width: dotR * 2, height: dotR * 2))
+                }
+
+                if face.count >= 478 {
+                    let r: CGFloat = alpha < 1 ? 3 : 5
+                    for i in 468..<478 {
+                        let p = toPixel(face[i])
+                        let rect = CGRect(x: p.x - r, y: p.y - r,
+                                          width: 2 * r, height: 2 * r)
+                        ctx.setFillColor(red: 0, green: 0, blue: 0,
+                                         alpha: 0.8 * alpha)
+                        ctx.fillEllipse(in: rect)
+                        ctx.setStrokeColor(red: 0, green: 0, blue: 0.8,
+                                           alpha: alpha)
+                        ctx.setLineWidth(1.5)
+                        ctx.strokeEllipse(in: rect)
+                    }
+                }
+            }
+        }
+
+        guard let cgImage = ctx.makeImage() else { return nil }
+        return CIImage(cgImage: cgImage)
+    }
+
+    private static func drawCGConnections(
+        ctx: CGContext, face: [CGPoint],
+        toPixel: (CGPoint) -> CGPoint, alpha: CGFloat
+    ) {
+        func strokePath(
+            _ indices: [Int],
+            r: CGFloat, g: CGFloat, b: CGFloat,
+            lineWidth: CGFloat = 1.5, closed: Bool = false
+        ) {
+            guard indices.count >= 2,
+                  indices.allSatisfy({ $0 < face.count }) else { return }
+            ctx.setStrokeColor(red: r, green: g, blue: b,
+                               alpha: 0.8 * alpha)
+            ctx.setLineWidth(lineWidth * (alpha < 1 ? 0.8 : 1.0))
+            ctx.beginPath()
+            ctx.move(to: toPixel(face[indices[0]]))
+            for i in indices.dropFirst() {
+                ctx.addLine(to: toPixel(face[i]))
+            }
+            if closed { ctx.closePath() }
+            ctx.strokePath()
+        }
+
+        strokePath(faceOval,          r: 0.5,  g: 0.5,  b: 0.5,  closed: true)
+        strokePath(leftEye,           r: 0,    g: 0,    b: 0.8,  closed: true)
+        strokePath(rightEye,          r: 0,    g: 0,    b: 0.8,  closed: true)
+        strokePath(leftEyebrowUpper,  r: 0.45, g: 0.3,  b: 0.15)
+        strokePath(leftEyebrowLower,  r: 0.45, g: 0.3,  b: 0.15)
+        strokePath(rightEyebrowUpper, r: 0.45, g: 0.3,  b: 0.15)
+        strokePath(rightEyebrowLower, r: 0.45, g: 0.3,  b: 0.15)
+        strokePath(lipsOuter,         r: 0.8,  g: 0,    b: 0,    closed: true)
+        strokePath(lipsInner,         r: 0.8,  g: 0,    b: 0,    lineWidth: 1, closed: true)
+        strokePath(noseBridge,        r: 0.5,  g: 0.5,  b: 0.5)
+        strokePath(noseBottom,        r: 0.5,  g: 0.5,  b: 0.5)
+
+        if face.count >= 478 {
+            strokePath(leftIris,  r: 0, g: 0, b: 0, lineWidth: 1.5, closed: true)
+            strokePath(rightIris, r: 0, g: 0, b: 0, lineWidth: 1.5, closed: true)
         }
     }
 

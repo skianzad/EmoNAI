@@ -29,7 +29,7 @@ class FastVLMModel {
 
     /// parameters controlling the output
     let generateParameters = GenerateParameters(temperature: 0.0)
-    let maxTokens = 240
+    var maxTokens = 240
 
     /// update the display every N tokens -- 4 looks like it updates continuously
     /// and is low overhead.  observed ~15% reduction in tokens/s when updating
@@ -104,6 +104,7 @@ class FastVLMModel {
                 // Check if task was cancelled
                 if Task.isCancelled { return }
 
+                let currentMaxTokens = self.maxTokens
                 let result = try await modelContainer.perform { context in
                     // Measure the time it takes to prepare the input
                     
@@ -147,7 +148,7 @@ class FastVLMModel {
                             }
                         }
 
-                        if tokens.count >= maxTokens {
+                        if tokens.count >= currentMaxTokens {
                             return .stop
                         } else {
                             return .more
