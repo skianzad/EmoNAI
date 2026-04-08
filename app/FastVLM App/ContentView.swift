@@ -183,7 +183,7 @@ struct ContentView: View {
                                 .overlay {
                                     if faceLandmarkModeEnabled,
                                        faceOverlayMode == .arrowsOnFace {
-                                        Color.black.opacity(0.45)
+                                        Color.black.opacity(0.3)
                                     }
                                 }
                                 .overlay {
@@ -586,13 +586,13 @@ struct ContentView: View {
                 let overlayMode2 = await MainActor.run { faceOverlayMode }
                 let basePrompt: String
                 if overlayMode2 == .arrowsOnFace {
-                    basePrompt = "Colored arrows show facial muscle movement on this face. What emotion is shown? Reply ONLY like: happy, tilting left"
+                    basePrompt = "Arrows on this face show muscle movement. Is the person happy, sad, angry, surprised, fearful, disgusted, or neutral? One word only."
                 } else {
                     basePrompt = prompt
                 }
                 if !emotions.isEmpty {
-                    let prev = emotions.suffix(3).joined(separator: " → ")
-                    fullPrompt = "\(basePrompt)\nPrevious: \(prev)"
+                    let prev = emotions.suffix(3).joined(separator: ", ")
+                    fullPrompt = "\(basePrompt) Recent: \(prev)"
                 } else {
                     fullPrompt = basePrompt
                 }
@@ -778,13 +778,13 @@ struct ContentView: View {
         let fullPrompt: String
         let singleBasePrompt: String
         if isFaceMode && currentOverlayMode == .arrowsOnFace {
-            singleBasePrompt = "Colored arrows show facial muscle movement on this face. What emotion is shown? Reply ONLY like: happy, tilting left"
+            singleBasePrompt = "Arrows on this face show muscle movement. Is the person happy, sad, angry, surprised, fearful, disgusted, or neutral? One word only."
         } else {
             singleBasePrompt = prompt
         }
         if isFaceMode && !emotionHistory.isEmpty {
-            let prev = emotionHistory.suffix(3).joined(separator: " → ")
-            fullPrompt = "\(singleBasePrompt)\nPrevious: \(prev)"
+            let prev = emotionHistory.suffix(3).joined(separator: ", ")
+            fullPrompt = "\(singleBasePrompt) Recent: \(prev)"
         } else if isFaceMode {
             fullPrompt = singleBasePrompt
         } else {
@@ -827,40 +827,29 @@ struct ContentView: View {
         "the image is", "this is a", "i see a",
     ]
 
-    /// Extracts a short emotion + movement label from a VLM response.
-    /// Returns empty string if the VLM clearly failed to interpret the image.
+    /// Extracts a short emotion label from a VLM response.
+    /// Always tries to find a known emotion keyword first and returns just that word.
     static func extractEmotion(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
         let lower = trimmed.lowercased()
 
-        // Reject responses where the VLM is describing the image instead
-        // of answering the emotion question
         for prefix in junkPrefixes {
-            if lower.hasPrefix(prefix) {
-                return ""
-            }
+            if lower.hasPrefix(prefix) { return "" }
         }
 
-        let allWords = trimmed.split(separator: " ")
-
-        // If short enough, use directly
-        if allWords.count <= 6 {
-            return trimmed
-        }
-
-        // Scan for known emotion keywords
-        let lowerWords = lower.split(separator: " ").map(String.init)
-        for (i, w) in lowerWords.enumerated() {
-            let clean = w.trimmingCharacters(in: .punctuationCharacters)
+        // Always scan for a known emotion keyword and return just that word
+        for w in lower.split(separator: " ") {
+            let clean = String(w).trimmingCharacters(in: .punctuationCharacters)
             if knownEmotions.contains(clean) {
-                let end = min(i + 4, allWords.count)
-                let slice = allWords[i..<end].joined(separator: " ")
-                return slice.trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+                return clean
             }
         }
 
-        // No known emotion found -- discard
+        // If the response is a single short word, keep it
+        let allWords = trimmed.split(separator: " ")
+        if allWords.count == 1 { return trimmed }
+
         return ""
     }
 }
@@ -1225,7 +1214,7 @@ private struct FaceLandmarkOverlay: View {
 
         // Draw the faded face
         ctx.saveGState()
-        ctx.setAlpha(0.45)
+        ctx.setAlpha(0.7)
         ctx.draw(faceCG, in: CGRect(x: 0, y: 0, width: side, height: side))
         ctx.restoreGState()
 
