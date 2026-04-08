@@ -51,6 +51,10 @@ struct ContentView: View {
     /// the oldest and newest ghost snapshots (robust to head movement).
     @State private var showMovementArrows: Bool = false
 
+    /// Last image sent to the VLM, shown as a debug thumbnail.
+    @State private var lastVLMInputImage: CGImage? = nil
+    @State private var showVLMDebugThumbnail: Bool = false
+
     var toolbarItemPlacement: ToolbarItemPlacement {
         var placement: ToolbarItemPlacement = .navigation
         #if os(iOS)
@@ -103,9 +107,9 @@ struct ContentView: View {
                                 model.maxTokens = 240
                             }
                             if enabled {
-                                prompt = "Name the exact emotion on this face and any head tilt or turn."
-                                promptSuffix = "Format: <emotion>, <movement>. Example: happy, tilting left. Do not describe the image."
-                                model.maxTokens = 25
+                                prompt = "What emotion? What head movement? Reply ONLY like: happy, tilting left"
+                                promptSuffix = ""
+                                model.maxTokens = 12
                             }
                         }
 
@@ -128,10 +132,17 @@ struct ContentView: View {
                                 Button {
                                     showMovementArrows.toggle()
                                 } label: {
-                                    Image(systemName: showMovementArrows
-                                          ? "arrow.up.and.down.and.arrow.left.and.right"
-                                          : "arrow.up.and.down.and.arrow.left.and.right")
+                                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                                         .foregroundStyle(showMovementArrows ? .blue : .gray)
+                                        .font(.title3)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    showVLMDebugThumbnail.toggle()
+                                } label: {
+                                    Image(systemName: "eye.circle")
+                                        .foregroundStyle(showVLMDebugThumbnail ? .blue : .gray)
                                         .font(.title3)
                                 }
                                 .buttonStyle(.plain)
@@ -184,6 +195,18 @@ struct ContentView: View {
                                         FaceMovementArrowsOverlay(
                                             oldSnapshot: displayFaceHistory.first!,
                                             newSnapshot: displayFaceHistory.last!)
+                                    }
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    if showVLMDebugThumbnail,
+                                       let cgImg = lastVLMInputImage {
+                                        Image(decorative: cgImg, scale: 1)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 120, height: 120)
+                                            .border(Color.white, width: 2)
+                                            .shadow(radius: 4)
+                                            .padding(8)
                                     }
                                 }
                                 .overlay(alignment: .top) {
@@ -523,6 +546,10 @@ struct ContentView: View {
                 imageForVLM = rendered
                 print("[VLM DEBUG] rendered \(vlmLandmarkHistory.count) ghosts, arrows=\(arrowsOn), extent: \(rendered.extent)")
                 debugSaveImage(rendered, tag: "vlm_input")
+                let ciCtx = CIContext()
+                if let cg = ciCtx.createCGImage(rendered, from: rendered.extent) {
+                    await MainActor.run { lastVLMInputImage = cg }
+                }
             } else {
                 vlmLandmarkHistory.removeAll()
                 imageForVLM = CIImage(cvPixelBuffer: frame)
@@ -532,10 +559,10 @@ struct ContentView: View {
             if isFaceMode {
                 let emotions = await MainActor.run { emotionHistory }
                 if !emotions.isEmpty {
-                    let prev = emotions.joined(separator: " → ")
-                    fullPrompt = "\(prompt) Previous readings were: [\(prev)]. State the current emotion, movement, and whether it differs from previous. \(promptSuffix)"
+                    let prev = emotions.suffix(3).joined(separator: " → ")
+                    fullPrompt = "\(prompt)\nPrevious: \(prev)"
                 } else {
-                    fullPrompt = "\(prompt) \(promptSuffix)"
+                    fullPrompt = prompt
                 }
                 print("[VLM DEBUG] prompt: \(fullPrompt)")
             } else {
@@ -555,9 +582,7 @@ struct ContentView: View {
                     model.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
                 print("[VLM DEBUG] response: \(rawEmotion)")
-                // Keep only first 3 words to prevent history bloat
-                let words = rawEmotion.split(separator: " ", maxSplits: 3)
-                let emotion = words.prefix(3).joined(separator: " ")
+                let emotion = Self.extractEmotion(from: rawEmotion)
                 if !emotion.isEmpty {
                     await MainActor.run {
                         emotionHistory.append(emotion)
@@ -690,6 +715,10 @@ struct ContentView: View {
                 imageForVLM = rendered
                 debugSaveImage(rendered, tag: "vlm_input_single")
                 print("[VLM DEBUG single] rendered \(history.count) ghosts, arrows=\(arrowsOn)")
+                let ciCtx = CIContext()
+                if let cg = ciCtx.createCGImage(rendered, from: rendered.extent) {
+                    lastVLMInputImage = cg
+                }
             } else if let detection = faceLandmarker.detectObservation(in: frame) {
                 if let rendered = FaceLandmarkOverlay.renderToImage(history: [detection]) {
                     imageForVLM = rendered
@@ -705,8 +734,10 @@ struct ContentView: View {
 
         let fullPrompt: String
         if isFaceMode && !emotionHistory.isEmpty {
-            let prev = emotionHistory.joined(separator: " → ")
-            fullPrompt = "\(prompt) Previous readings were: [\(prev)]. State the current emotion, movement, and whether it differs from previous. \(promptSuffix)"
+            let prev = emotionHistory.suffix(3).joined(separator: " → ")
+            fullPrompt = "\(prompt)\nPrevious: \(prev)"
+        } else if isFaceMode {
+            fullPrompt = prompt
         } else {
             fullPrompt = "\(prompt) \(promptSuffix)"
         }
@@ -721,8 +752,7 @@ struct ContentView: View {
             _ = await t.result
             if isFaceMode {
                 let raw = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                let words = raw.split(separator: " ", maxSplits: 3)
-                let emotion = words.prefix(3).joined(separator: " ")
+                let emotion = Self.extractEmotion(from: raw)
                 if !emotion.isEmpty {
                     emotionHistory.append(emotion)
                     if emotionHistory.count > 5 {
@@ -731,6 +761,45 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Emotion extraction
+
+    private static let knownEmotions: Set<String> = [
+        "happy", "happiness", "sad", "sadness", "angry", "anger",
+        "surprised", "surprise", "fearful", "fear", "disgusted", "disgust",
+        "neutral", "contempt", "joy", "anxious", "confused", "bored",
+        "excited", "calm", "smiling", "frowning", "worried"
+    ]
+
+    /// Extracts a short emotion + movement label from a VLM response.
+    /// If the response already matches "emotion, movement" format, returns as-is (trimmed).
+    /// Otherwise scans for known emotion keywords and returns up to ~6 words.
+    static func extractEmotion(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+        let lower = trimmed.lowercased()
+
+        // If the response is already short (<=6 words), use it directly
+        let allWords = trimmed.split(separator: " ")
+        if allWords.count <= 6 {
+            return trimmed
+        }
+
+        // Scan for known emotion keywords
+        let lowerWords = lower.split(separator: " ").map(String.init)
+        for (i, w) in lowerWords.enumerated() {
+            let clean = w.trimmingCharacters(in: .punctuationCharacters)
+            if knownEmotions.contains(clean) {
+                // Take this word and up to 3 words after it for context
+                let end = min(i + 4, allWords.count)
+                let slice = allWords[i..<end].joined(separator: " ")
+                return slice.trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+            }
+        }
+
+        // Fallback: first 4 words
+        return allWords.prefix(4).joined(separator: " ")
     }
 }
 
