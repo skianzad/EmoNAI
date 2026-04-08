@@ -24,8 +24,8 @@ struct ContentView: View {
 
     @State private var prompt = "Describe the image in English."
     @State private var promptSuffix = "Output should be brief, about 15 words or less."
-    @State private var arrowsOnFacePrompt = "Rate this face's arousal (calm to excited) and valence (negative to positive)."
-    @State private var arrowsOnFaceSuffix = "Format: arousal <low/medium/high>, valence <negative/neutral/positive>. Under 10 words."
+    @State private var arrowsOnFacePrompt = "Arousal(-10calm,10excited)? Valence(-10neg,10pos)?"
+    @State private var arrowsOnFaceSuffix = "Answer ONLY two numbers separated by comma. Example: 3,-5"
 
     @State private var isShowingInfo: Bool = false
 
@@ -115,7 +115,7 @@ struct ContentView: View {
                             if enabled {
                                 prompt = "What emotion is this face showing?"
                                 promptSuffix = "One word: happy, sad, angry, surprised, fearful, disgusted, or neutral. Under 15 words."
-                                model.maxTokens = 20
+                                model.maxTokens = 8
                             }
                         }
 
@@ -895,7 +895,17 @@ struct ContentView: View {
             if lower.hasPrefix(prefix) { return "" }
         }
 
-        // Check for arousal/valence format
+        // Check for numeric arousal/valence like "3, -5" or "3,-5"
+        let numPattern = lower
+            .replacingOccurrences(of: " ", with: "")
+        let numParts = numPattern.split(separator: ",")
+        if numParts.count == 2,
+           let a = Int(numParts[0]), let v = Int(numParts[1]),
+           (-10...10).contains(a), (-10...10).contains(v) {
+            return "A:\(a) V:\(v)"
+        }
+
+        // Check for arousal/valence keywords
         if lower.contains("arousal") || lower.contains("valence") {
             let words = lower.split(separator: " ")
                 .map { String($0).trimmingCharacters(in: .punctuationCharacters) }
@@ -911,7 +921,7 @@ struct ContentView: View {
         }
 
         let allWords = trimmed.split(separator: " ")
-        if allWords.count <= 6 { return trimmed.lowercased() }
+        if allWords.count <= 4 { return trimmed.lowercased() }
 
         return ""
     }
