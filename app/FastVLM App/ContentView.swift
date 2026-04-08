@@ -586,7 +586,7 @@ struct ContentView: View {
                 let overlayMode2 = await MainActor.run { faceOverlayMode }
                 let basePrompt: String
                 if overlayMode2 == .arrowsOnFace {
-                    basePrompt = "Arrows on this face show muscle movement. \(prompt)"
+                    basePrompt = "Green arrows show muscle movement. \(prompt)"
                 } else {
                     basePrompt = prompt
                 }
@@ -778,7 +778,7 @@ struct ContentView: View {
         let fullPrompt: String
         let singleBasePrompt: String
         if isFaceMode && currentOverlayMode == .arrowsOnFace {
-            singleBasePrompt = "Arrows on this face show muscle movement. \(prompt)"
+            singleBasePrompt = "Green arrows show muscle movement. \(prompt)"
         } else {
             singleBasePrompt = prompt
         }
@@ -1483,7 +1483,9 @@ private struct FaceMovementArrowsOverlay: View {
             CGPoint(x: p.x * size, y: p.y * size)
         }
 
-        for (_, indices, color) in cgFeatureColors {
+        let arrowR: CGFloat = 0.0, arrowG: CGFloat = 0.9, arrowB: CGFloat = 0.2
+
+        for (_, indices, _) in cgFeatureColors {
             guard let oldCtr = centroid(of: indices, in: oldFace),
                   let newCtr = centroid(of: indices, in: newFace) else { continue }
             let expected = oldCtr.applying(xform)
@@ -1500,7 +1502,7 @@ private struct FaceMovementArrowsOverlay: View {
             let shaftLen = hypot(tip.x - origin.x, tip.y - origin.y)
             guard shaftLen > 3 else { continue }
 
-            ctx.setStrokeColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0)
+            ctx.setStrokeColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
             ctx.setLineWidth(2.5)
             ctx.beginPath()
             ctx.move(to: origin)
@@ -1510,7 +1512,7 @@ private struct FaceMovementArrowsOverlay: View {
             let headLen: CGFloat = min(12, shaftLen * 0.35)
             let angle = atan2(tip.y - origin.y, tip.x - origin.x)
             let spread: CGFloat = .pi / 6
-            ctx.setFillColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0)
+            ctx.setFillColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
             ctx.beginPath()
             ctx.move(to: tip)
             ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle - spread),
@@ -1587,18 +1589,16 @@ private struct FaceMovementArrowsOverlay: View {
             CGPoint(x: p.x * scaledW - offX, y: p.y * scaledH - offY)
         }
 
-        for (_, indices, color) in Self.featureGroups {
+        let arrowColor = Color(red: 0, green: 0.9, blue: 0.2)
+
+        for (_, indices, _) in Self.featureGroups {
             guard let oldCtr = Self.centroid(of: indices, in: oldFace),
                   let newCtr = Self.centroid(of: indices, in: newFace) else { continue }
 
-            // Where the old centroid *would* be if only the head moved
             let expected = oldCtr.applying(xform)
-
-            // Residual = actual new position − expected position
             let dx = newCtr.x - expected.x
             let dy = newCtr.y - expected.y
 
-            // Normalise by inter-eye distance; skip small movements
             let normMag = hypot(dx, dy) / eyeDist
             guard normMag > 0.02 else { continue }
 
@@ -1608,7 +1608,7 @@ private struct FaceMovementArrowsOverlay: View {
                               y: origin.y + dy * arrowScale)
 
             drawArrow(ctx: ctx, from: origin, to: tip,
-                      color: color, lineWidth: 2.5)
+                      color: arrowColor, lineWidth: 2.5)
         }
     }
 
