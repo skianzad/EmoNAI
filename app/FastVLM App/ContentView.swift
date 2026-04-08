@@ -553,11 +553,10 @@ struct ContentView: View {
                 }
 
                 let rendered: CIImage?
-                if overlayMode == .arrowsOnFace, vlmLandmarkHistory.count >= 2 {
-                    rendered = FaceLandmarkOverlay.renderFaceWithArrows(
+                if overlayMode == .arrowsOnFace {
+                    rendered = FaceLandmarkOverlay.renderCroppedFace(
                         frame: frame,
-                        oldSnapshot: vlmLandmarkHistory.first!,
-                        newSnapshot: vlmLandmarkHistory.last!)
+                        snapshot: vlmLandmarkHistory.last!)
                 } else {
                     rendered = FaceLandmarkOverlay.renderToImage(
                         history: vlmLandmarkHistory,
@@ -746,11 +745,10 @@ struct ContentView: View {
             let arrowsOn = currentOverlayMode == .arrows || currentOverlayMode == .arrowsOnFace
 
             var rendered: CIImage? = nil
-            if currentOverlayMode == .arrowsOnFace, history.count >= 2 {
-                rendered = FaceLandmarkOverlay.renderFaceWithArrows(
+            if currentOverlayMode == .arrowsOnFace, !history.isEmpty {
+                rendered = FaceLandmarkOverlay.renderCroppedFace(
                     frame: frame,
-                    oldSnapshot: history.first!,
-                    newSnapshot: history.last!)
+                    snapshot: history.last!)
             }
             if rendered == nil {
                 rendered = FaceLandmarkOverlay.renderToImage(
@@ -1155,24 +1153,16 @@ private struct FaceLandmarkOverlay: View {
         return CIImage(cgImage: cgImage)
     }
 
-    /// Composites the camera frame (faded) with movement arrows into a
-    /// 512×512 CIImage. The face is cropped using landmark bounds, dimmed,
-    /// and arrows are drawn on top.
-    static func renderFaceWithArrows(
+    /// Crops the face from the camera frame and scales to 512×512.
+    static func renderCroppedFace(
         frame: CVPixelBuffer,
-        oldSnapshot: FaceLandmarkDisplayResult,
-        newSnapshot: FaceLandmarkDisplayResult
+        snapshot: FaceLandmarkDisplayResult
     ) -> CIImage? {
-        guard let newFace = newSnapshot.landmarks.first,
-              let oldFace = oldSnapshot.landmarks.first,
-              newFace.count >= 468, oldFace.count >= 468 else { return nil }
+        guard let face = snapshot.landmarks.first,
+              face.count >= 468 else { return nil }
 
-        let side = 512
-        let s = CGFloat(side)
-
-        // Compute face bounding box from landmarks (normalised coords)
-        let xs = newFace.map(\.x)
-        let ys = newFace.map(\.y)
+        let xs = face.map(\.x)
+        let ys = face.map(\.y)
         guard let minX = xs.min(), let maxX = xs.max(),
               let minY = ys.min(), let maxY = ys.max() else { return nil }
 
@@ -1185,7 +1175,6 @@ private struct FaceLandmarkOverlay: View {
             width: min(1.0, faceW * (1 + 2 * pad)),
             height: min(1.0, faceH * (1 + 2 * pad)))
 
-        // Convert normalised crop to pixel coords (CIImage bottom-left origin)
         let imgW = CGFloat(CVPixelBufferGetWidth(frame))
         let imgH = CGFloat(CVPixelBufferGetHeight(frame))
         let pixelRect = CGRect(
@@ -1197,7 +1186,7 @@ private struct FaceLandmarkOverlay: View {
 
         guard pixelRect.width > 1, pixelRect.height > 1 else { return nil }
 
-        // Crop and scale the camera frame to 512×512
+        let s: CGFloat = 512
         var ciImage = CIImage(cvPixelBuffer: frame)
             .cropped(to: pixelRect)
             .transformed(by: CGAffineTransform(
@@ -1206,45 +1195,7 @@ private struct FaceLandmarkOverlay: View {
         let scaleY = s / ciImage.extent.height
         ciImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
 
-        // Render into CGContext
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil, width: side, height: side,
-            bitsPerComponent: 8, bytesPerRow: side * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        let ciCtx = CIContext()
-        guard let faceCG = ciCtx.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: s, height: s)) else { return nil }
-
-        // Draw the faded face
-        ctx.saveGState()
-        ctx.setAlpha(0.7)
-        ctx.draw(faceCG, in: CGRect(x: 0, y: 0, width: side, height: side))
-        ctx.restoreGState()
-
-        // Flip to top-left origin for arrow drawing (landmarks use top-left)
-        ctx.translateBy(x: 0, y: s)
-        ctx.scaleBy(x: 1, y: -1)
-
-        // Remap landmark coordinates from full-frame normalised → crop-relative
-        func remapFace(_ face: [CGPoint]) -> [CGPoint] {
-            face.map { p in
-                CGPoint(
-                    x: (p.x - cropNorm.minX) / cropNorm.width,
-                    y: (p.y - cropNorm.minY) / cropNorm.height)
-            }
-        }
-
-        let remappedOld = remapFace(oldFace)
-        let remappedNew = remapFace(newFace)
-
-        FaceMovementArrowsOverlay.drawArrowsCG(
-            ctx: ctx, oldFace: remappedOld, newFace: remappedNew, size: s)
-
-        guard let cgImage = ctx.makeImage() else { return nil }
-        return CIImage(cgImage: cgImage)
+        return ciImage
     }
 
     private static func drawCGConnections(
