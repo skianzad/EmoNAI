@@ -111,8 +111,8 @@ struct ContentView: View {
                                 model.maxTokens = 240
                             }
                             if enabled {
-                                prompt = "This image shows face landmark dots and lines forming a face mesh. Based on the shape of the eyes, eyebrows, and mouth, what emotion is this? Reply with just the emotion and head tilt, like: happy, tilting left"
-                                promptSuffix = ""
+                                prompt = "What emotion is this face showing?"
+                                promptSuffix = "One word: happy, sad, angry, surprised, fearful, disgusted, or neutral. Under 15 words."
                                 model.maxTokens = 30
                             }
                         }
@@ -586,15 +586,15 @@ struct ContentView: View {
                 let overlayMode2 = await MainActor.run { faceOverlayMode }
                 let basePrompt: String
                 if overlayMode2 == .arrowsOnFace {
-                    basePrompt = "Arrows on this face show muscle movement. Is the person happy, sad, angry, surprised, fearful, disgusted, or neutral? One word only."
+                    basePrompt = "Arrows on this face show muscle movement. \(prompt)"
                 } else {
                     basePrompt = prompt
                 }
                 if !emotions.isEmpty {
                     let prev = emotions.suffix(3).joined(separator: ", ")
-                    fullPrompt = "\(basePrompt) Recent: \(prev)"
+                    fullPrompt = "\(basePrompt) Recent: \(prev). \(promptSuffix)"
                 } else {
-                    fullPrompt = basePrompt
+                    fullPrompt = "\(basePrompt) \(promptSuffix)"
                 }
                 print("[VLM DEBUG] prompt: \(fullPrompt)")
             } else {
@@ -778,15 +778,15 @@ struct ContentView: View {
         let fullPrompt: String
         let singleBasePrompt: String
         if isFaceMode && currentOverlayMode == .arrowsOnFace {
-            singleBasePrompt = "Arrows on this face show muscle movement. Is the person happy, sad, angry, surprised, fearful, disgusted, or neutral? One word only."
+            singleBasePrompt = "Arrows on this face show muscle movement. \(prompt)"
         } else {
             singleBasePrompt = prompt
         }
         if isFaceMode && !emotionHistory.isEmpty {
             let prev = emotionHistory.suffix(3).joined(separator: ", ")
-            fullPrompt = "\(singleBasePrompt) Recent: \(prev)"
+            fullPrompt = "\(singleBasePrompt) Recent: \(prev). \(promptSuffix)"
         } else if isFaceMode {
-            fullPrompt = singleBasePrompt
+            fullPrompt = "\(singleBasePrompt) \(promptSuffix)"
         } else {
             fullPrompt = "\(prompt) \(promptSuffix)"
         }
