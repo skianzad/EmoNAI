@@ -47,9 +47,13 @@ struct ContentView: View {
     /// Rolling history of VLM emotion responses for change-detection prompting.
     @State private var emotionHistory: [String] = []
 
-    /// When enabled, draws arrows showing relative feature movement between
-    /// the oldest and newest ghost snapshots (robust to head movement).
-    @State private var showMovementArrows: Bool = false
+    /// Face landmark display mode when face landmark mode is enabled.
+    enum FaceOverlayMode: Int, CaseIterable {
+        case ghosts = 0      // ghost trail of past landmark snapshots
+        case arrows = 1      // current landmarks + movement arrows
+        case arrowsOnFace = 2 // faded camera frame + movement arrows (sent to VLM)
+    }
+    @State private var faceOverlayMode: FaceOverlayMode = .ghosts
 
     /// Last image sent to the VLM, shown as a debug thumbnail.
     @State private var lastVLMInputImage: CGImage? = nil
@@ -129,14 +133,16 @@ struct ContentView: View {
 
                                 Spacer()
 
-                                Button {
-                                    showMovementArrows.toggle()
-                                } label: {
+                                Picker("Overlay", selection: $faceOverlayMode) {
+                                    Image(systemName: "circle.grid.3x3")
+                                        .tag(FaceOverlayMode.ghosts)
                                     Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                                        .foregroundStyle(showMovementArrows ? .blue : .gray)
-                                        .font(.title3)
+                                        .tag(FaceOverlayMode.arrows)
+                                    Image(systemName: "person.fill.viewfinder")
+                                        .tag(FaceOverlayMode.arrowsOnFace)
                                 }
-                                .buttonStyle(.plain)
+                                .pickerStyle(.segmented)
+                                .frame(maxWidth: 140)
 
                                 Button {
                                     showVLMDebugThumbnail.toggle()
@@ -169,28 +175,38 @@ struct ContentView: View {
                                 .frame(maxWidth: 750)
                                 #endif
                                 .overlay {
-                                    if faceLandmarkModeEnabled {
+                                    if faceLandmarkModeEnabled,
+                                       faceOverlayMode != .arrowsOnFace {
                                         Color.white
                                     }
                                 }
                                 .overlay {
                                     if faceLandmarkModeEnabled,
+                                       faceOverlayMode == .arrowsOnFace {
+                                        Color.black.opacity(0.45)
+                                    }
+                                }
+                                .overlay {
+                                    if faceLandmarkModeEnabled,
                                        !displayFaceHistory.isEmpty {
-                                        if showMovementArrows {
+                                        switch faceOverlayMode {
+                                        case .ghosts:
+                                            FaceLandmarkOverlay(
+                                                history: displayFaceHistory)
+                                        case .arrows:
                                             FaceLandmarkOverlay(
                                                 history: [displayFaceHistory.last!],
                                                 referenceFace: displayFaceHistory.count >= 2
                                                     ? displayFaceHistory.first!.landmarks.first
                                                     : nil)
-                                        } else {
-                                            FaceLandmarkOverlay(
-                                                history: displayFaceHistory)
+                                        case .arrowsOnFace:
+                                            EmptyView()
                                         }
                                     }
                                 }
                                 .overlay {
                                     if faceLandmarkModeEnabled,
-                                       showMovementArrows,
+                                       faceOverlayMode != .ghosts,
                                        displayFaceHistory.count >= 2 {
                                         FaceMovementArrowsOverlay(
                                             oldSnapshot: displayFaceHistory.first!,
@@ -524,8 +540,8 @@ struct ContentView: View {
                     vlmLandmarkHistory[vlmLandmarkHistory.count - 1] = detection
                 }
 
-                // Only run VLM when arrows indicate meaningful movement
-                let arrowsOn = await MainActor.run { showMovementArrows }
+                let overlayMode = await MainActor.run { faceOverlayMode }
+                let arrowsOn = overlayMode == .arrows || overlayMode == .arrowsOnFace
                 if arrowsOn && vlmLandmarkHistory.count >= 2 {
                     let hasMovement = FaceMovementArrowsOverlay.hasMeaningfulMovement(
                         old: vlmLandmarkHistory.first!,
@@ -536,15 +552,24 @@ struct ContentView: View {
                     }
                 }
 
-                guard let rendered = FaceLandmarkOverlay.renderToImage(
-                    history: vlmLandmarkHistory,
-                    drawArrows: arrowsOn
-                ) else {
+                let rendered: CIImage?
+                if overlayMode == .arrowsOnFace, vlmLandmarkHistory.count >= 2 {
+                    rendered = FaceLandmarkOverlay.renderFaceWithArrows(
+                        frame: frame,
+                        oldSnapshot: vlmLandmarkHistory.first!,
+                        newSnapshot: vlmLandmarkHistory.last!)
+                } else {
+                    rendered = FaceLandmarkOverlay.renderToImage(
+                        history: vlmLandmarkHistory,
+                        drawArrows: arrowsOn)
+                }
+
+                guard let rendered else {
                     print("[VLM DEBUG] renderToImage failed")
                     continue
                 }
                 imageForVLM = rendered
-                print("[VLM DEBUG] rendered \(vlmLandmarkHistory.count) ghosts, arrows=\(arrowsOn), extent: \(rendered.extent)")
+                print("[VLM DEBUG] rendered mode=\(overlayMode), \(vlmLandmarkHistory.count) ghosts, extent: \(rendered.extent)")
                 debugSaveImage(rendered, tag: "vlm_input")
                 let ciCtx = CIContext()
                 if let cg = ciCtx.createCGImage(rendered, from: rendered.extent) {
@@ -558,11 +583,18 @@ struct ContentView: View {
             let fullPrompt: String
             if isFaceMode {
                 let emotions = await MainActor.run { emotionHistory }
+                let overlayMode2 = await MainActor.run { faceOverlayMode }
+                let basePrompt: String
+                if overlayMode2 == .arrowsOnFace {
+                    basePrompt = "Colored arrows show facial muscle movement on this face. What emotion is shown? Reply ONLY like: happy, tilting left"
+                } else {
+                    basePrompt = prompt
+                }
                 if !emotions.isEmpty {
                     let prev = emotions.suffix(3).joined(separator: " → ")
-                    fullPrompt = "\(prompt)\nPrevious: \(prev)"
+                    fullPrompt = "\(basePrompt)\nPrevious: \(prev)"
                 } else {
-                    fullPrompt = prompt
+                    fullPrompt = basePrompt
                 }
                 print("[VLM DEBUG] prompt: \(fullPrompt)")
             } else {
@@ -704,24 +736,35 @@ struct ContentView: View {
         }
 
         let isFaceMode = faceLandmarkModeEnabled
+        let currentOverlayMode = faceOverlayMode
         let imageForVLM: CIImage
         if isFaceMode {
-            // Use the display history which is already populated by detectDisplayLandmarks
             let history = displayFaceHistory
-            let arrowsOn = showMovementArrows
-            if let rendered = FaceLandmarkOverlay.renderToImage(
-                history: history, drawArrows: arrowsOn
-            ) {
+            let arrowsOn = currentOverlayMode == .arrows || currentOverlayMode == .arrowsOnFace
+
+            var rendered: CIImage? = nil
+            if currentOverlayMode == .arrowsOnFace, history.count >= 2 {
+                rendered = FaceLandmarkOverlay.renderFaceWithArrows(
+                    frame: frame,
+                    oldSnapshot: history.first!,
+                    newSnapshot: history.last!)
+            }
+            if rendered == nil {
+                rendered = FaceLandmarkOverlay.renderToImage(
+                    history: history, drawArrows: arrowsOn)
+            }
+
+            if let rendered {
                 imageForVLM = rendered
                 debugSaveImage(rendered, tag: "vlm_input_single")
-                print("[VLM DEBUG single] rendered \(history.count) ghosts, arrows=\(arrowsOn)")
+                print("[VLM DEBUG single] rendered mode=\(currentOverlayMode), \(history.count) ghosts")
                 let ciCtx = CIContext()
                 if let cg = ciCtx.createCGImage(rendered, from: rendered.extent) {
                     lastVLMInputImage = cg
                 }
             } else if let detection = faceLandmarker.detectObservation(in: frame) {
-                if let rendered = FaceLandmarkOverlay.renderToImage(history: [detection]) {
-                    imageForVLM = rendered
+                if let r = FaceLandmarkOverlay.renderToImage(history: [detection]) {
+                    imageForVLM = r
                 } else {
                     imageForVLM = CIImage(cvPixelBuffer: frame)
                 }
@@ -733,11 +776,17 @@ struct ContentView: View {
         }
 
         let fullPrompt: String
+        let singleBasePrompt: String
+        if isFaceMode && currentOverlayMode == .arrowsOnFace {
+            singleBasePrompt = "Colored arrows show facial muscle movement on this face. What emotion is shown? Reply ONLY like: happy, tilting left"
+        } else {
+            singleBasePrompt = prompt
+        }
         if isFaceMode && !emotionHistory.isEmpty {
             let prev = emotionHistory.suffix(3).joined(separator: " → ")
-            fullPrompt = "\(prompt)\nPrevious: \(prev)"
+            fullPrompt = "\(singleBasePrompt)\nPrevious: \(prev)"
         } else if isFaceMode {
-            fullPrompt = prompt
+            fullPrompt = singleBasePrompt
         } else {
             fullPrompt = "\(prompt) \(promptSuffix)"
         }
@@ -1106,6 +1155,98 @@ private struct FaceLandmarkOverlay: View {
             FaceMovementArrowsOverlay.drawArrowsCG(
                 ctx: ctx, oldFace: oldFace, newFace: newFace, size: s)
         }
+
+        guard let cgImage = ctx.makeImage() else { return nil }
+        return CIImage(cgImage: cgImage)
+    }
+
+    /// Composites the camera frame (faded) with movement arrows into a
+    /// 512×512 CIImage. The face is cropped using landmark bounds, dimmed,
+    /// and arrows are drawn on top.
+    static func renderFaceWithArrows(
+        frame: CVPixelBuffer,
+        oldSnapshot: FaceLandmarkDisplayResult,
+        newSnapshot: FaceLandmarkDisplayResult
+    ) -> CIImage? {
+        guard let newFace = newSnapshot.landmarks.first,
+              let oldFace = oldSnapshot.landmarks.first,
+              newFace.count >= 468, oldFace.count >= 468 else { return nil }
+
+        let side = 512
+        let s = CGFloat(side)
+
+        // Compute face bounding box from landmarks (normalised coords)
+        let xs = newFace.map(\.x)
+        let ys = newFace.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(),
+              let minY = ys.min(), let maxY = ys.max() else { return nil }
+
+        let faceW = maxX - minX
+        let faceH = maxY - minY
+        let pad: CGFloat = 0.25
+        let cropNorm = CGRect(
+            x: max(0, minX - faceW * pad),
+            y: max(0, minY - faceH * pad),
+            width: min(1.0, faceW * (1 + 2 * pad)),
+            height: min(1.0, faceH * (1 + 2 * pad)))
+
+        // Convert normalised crop to pixel coords (CIImage bottom-left origin)
+        let imgW = CGFloat(CVPixelBufferGetWidth(frame))
+        let imgH = CGFloat(CVPixelBufferGetHeight(frame))
+        let pixelRect = CGRect(
+            x: cropNorm.minX * imgW,
+            y: (1.0 - cropNorm.maxY) * imgH,
+            width: cropNorm.width * imgW,
+            height: cropNorm.height * imgH)
+            .intersection(CGRect(x: 0, y: 0, width: imgW, height: imgH))
+
+        guard pixelRect.width > 1, pixelRect.height > 1 else { return nil }
+
+        // Crop and scale the camera frame to 512×512
+        var ciImage = CIImage(cvPixelBuffer: frame)
+            .cropped(to: pixelRect)
+            .transformed(by: CGAffineTransform(
+                translationX: -pixelRect.minX, y: -pixelRect.minY))
+        let scaleX = s / ciImage.extent.width
+        let scaleY = s / ciImage.extent.height
+        ciImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+
+        // Render into CGContext
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: side, height: side,
+            bitsPerComponent: 8, bytesPerRow: side * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let ciCtx = CIContext()
+        guard let faceCG = ciCtx.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: s, height: s)) else { return nil }
+
+        // Draw the faded face
+        ctx.saveGState()
+        ctx.setAlpha(0.45)
+        ctx.draw(faceCG, in: CGRect(x: 0, y: 0, width: side, height: side))
+        ctx.restoreGState()
+
+        // Flip to top-left origin for arrow drawing (landmarks use top-left)
+        ctx.translateBy(x: 0, y: s)
+        ctx.scaleBy(x: 1, y: -1)
+
+        // Remap landmark coordinates from full-frame normalised → crop-relative
+        func remapFace(_ face: [CGPoint]) -> [CGPoint] {
+            face.map { p in
+                CGPoint(
+                    x: (p.x - cropNorm.minX) / cropNorm.width,
+                    y: (p.y - cropNorm.minY) / cropNorm.height)
+            }
+        }
+
+        let remappedOld = remapFace(oldFace)
+        let remappedNew = remapFace(newFace)
+
+        FaceMovementArrowsOverlay.drawArrowsCG(
+            ctx: ctx, oldFace: remappedOld, newFace: remappedNew, size: s)
 
         guard let cgImage = ctx.makeImage() else { return nil }
         return CIImage(cgImage: cgImage)
