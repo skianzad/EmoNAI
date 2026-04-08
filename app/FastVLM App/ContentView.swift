@@ -24,8 +24,8 @@ struct ContentView: View {
 
     @State private var prompt = "Describe the image in English."
     @State private var promptSuffix = "Output should be brief, about 15 words or less."
-    @State private var arrowsOnFacePrompt = "How is the emotion changing?"
-    @State private var arrowsOnFaceSuffix = "Briefly describe the emotion transition in under 15 words. Example: shifting from neutral to a slight smile, eyebrows relaxing."
+    @State private var arrowsOnFacePrompt = "Rate this face's arousal (calm to excited) and valence (negative to positive)."
+    @State private var arrowsOnFaceSuffix = "Format: arousal <low/medium/high>, valence <negative/neutral/positive>. Under 10 words."
 
     @State private var isShowingInfo: Bool = false
 
@@ -115,7 +115,7 @@ struct ContentView: View {
                             if enabled {
                                 prompt = "What emotion is this face showing?"
                                 promptSuffix = "One word: happy, sad, angry, surprised, fearful, disgusted, or neutral. Under 15 words."
-                                model.maxTokens = 50
+                                model.maxTokens = 20
                             }
                         }
 
@@ -879,9 +879,13 @@ struct ContentView: View {
         "the image is", "this is a", "i see a",
     ]
 
-    /// Extracts a usable emotion description from a VLM response.
-    /// Filters out junk prefixes where the VLM describes the image itself.
-    /// Keeps short transition descriptions (e.g. "shifting from neutral to a smile").
+    /// Extracts a short emotion label from a VLM response.
+    /// Always tries to find a known emotion keyword first and returns just that word.
+    private static let arousalValenceKeywords: Set<String> = [
+        "arousal", "valence", "low", "medium", "high",
+        "negative", "neutral", "positive"
+    ]
+
     static func extractEmotion(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
@@ -891,11 +895,25 @@ struct ContentView: View {
             if lower.hasPrefix(prefix) { return "" }
         }
 
-        if trimmed.isEmpty { return "" }
+        // Check for arousal/valence format
+        if lower.contains("arousal") || lower.contains("valence") {
+            let words = lower.split(separator: " ")
+                .map { String($0).trimmingCharacters(in: .punctuationCharacters) }
+                .filter { arousalValenceKeywords.contains($0) }
+            if words.count >= 2 { return words.joined(separator: " ") }
+        }
 
-        let words = trimmed.split(separator: " ")
-        let cap = min(words.count, 20)
-        return words.prefix(cap).joined(separator: " ")
+        for w in lower.split(separator: " ") {
+            let clean = String(w).trimmingCharacters(in: .punctuationCharacters)
+            if knownEmotions.contains(clean) {
+                return clean
+            }
+        }
+
+        let allWords = trimmed.split(separator: " ")
+        if allWords.count <= 6 { return trimmed.lowercased() }
+
+        return ""
     }
 }
 
