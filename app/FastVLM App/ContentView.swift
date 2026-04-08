@@ -113,7 +113,7 @@ struct ContentView: View {
                             if enabled {
                                 prompt = "This image shows face landmark dots and lines forming a face mesh. Based on the shape of the eyes, eyebrows, and mouth, what emotion is this? Reply with just the emotion and head tilt, like: happy, tilting left"
                                 promptSuffix = ""
-                                model.maxTokens = 12
+                                model.maxTokens = 30
                             }
                         }
 
