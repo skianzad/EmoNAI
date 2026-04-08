@@ -24,6 +24,8 @@ struct ContentView: View {
 
     @State private var prompt = "Describe the image in English."
     @State private var promptSuffix = "Output should be brief, about 15 words or less."
+    @State private var arrowsOnFacePrompt = "Emotion?"
+    @State private var arrowsOnFaceSuffix = "Reply with ONLY the emotion word."
 
     @State private var isShowingInfo: Bool = false
 
@@ -434,13 +436,16 @@ struct ContentView: View {
     var promptSummary: some View {
         Section("Prompt") {
             VStack(alignment: .leading, spacing: 4.0) {
-                let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isAOF = faceLandmarkModeEnabled && faceOverlayMode == .arrowsOnFace
+                let activePrompt = isAOF ? arrowsOnFacePrompt : prompt
+                let activeSuffix = isAOF ? arrowsOnFaceSuffix : promptSuffix
+                let trimmedPrompt = activePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmedPrompt.isEmpty {
                     Text(trimmedPrompt)
                         .foregroundStyle(.secondary)
                 }
 
-                let trimmedSuffix = promptSuffix.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedSuffix = activeSuffix.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmedSuffix.isEmpty {
                     Text(trimmedSuffix)
                         .font(.caption)
@@ -453,40 +458,78 @@ struct ContentView: View {
     var promptForm: some View {
         Group {
             #if os(iOS)
-            Section("Prompt") {
-                TextEditor(text: $prompt)
-                    .frame(minHeight: 38)
-            }
-
-            Section("Prompt Suffix") {
-                TextEditor(text: $promptSuffix)
-                    .frame(minHeight: 38)
+            if faceLandmarkModeEnabled && faceOverlayMode == .arrowsOnFace {
+                Section("Face+Arrows Prompt") {
+                    TextEditor(text: $arrowsOnFacePrompt)
+                        .frame(minHeight: 38)
+                }
+                Section("Face+Arrows Suffix") {
+                    TextEditor(text: $arrowsOnFaceSuffix)
+                        .frame(minHeight: 38)
+                }
+            } else {
+                Section("Prompt") {
+                    TextEditor(text: $prompt)
+                        .frame(minHeight: 38)
+                }
+                Section("Prompt Suffix") {
+                    TextEditor(text: $promptSuffix)
+                        .frame(minHeight: 38)
+                }
             }
             #elseif os(macOS)
             Section {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading) {
-                        Text("Prompt")
-                            .font(.headline)
+                if faceLandmarkModeEnabled && faceOverlayMode == .arrowsOnFace {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading) {
+                            Text("Face+Arrows Prompt")
+                                .font(.headline)
 
-                        TextEditor(text: $prompt)
-                            .frame(height: 38)
-                            .padding(.horizontal, 8.0)
-                            .padding(.vertical, 10.0)
-                            .background(Color(.textBackgroundColor))
-                            .cornerRadius(10.0)
+                            TextEditor(text: $arrowsOnFacePrompt)
+                                .frame(height: 38)
+                                .padding(.horizontal, 8.0)
+                                .padding(.vertical, 10.0)
+                                .background(Color(.textBackgroundColor))
+                                .cornerRadius(10.0)
+                        }
+
+                        VStack(alignment: .leading) {
+                            Text("Face+Arrows Suffix")
+                                .font(.headline)
+
+                            TextEditor(text: $arrowsOnFaceSuffix)
+                                .frame(height: 38)
+                                .padding(.horizontal, 8.0)
+                                .padding(.vertical, 10.0)
+                                .background(Color(.textBackgroundColor))
+                                .cornerRadius(10.0)
+                        }
                     }
+                } else {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading) {
+                            Text("Prompt")
+                                .font(.headline)
 
-                    VStack(alignment: .leading) {
-                        Text("Prompt Suffix")
-                            .font(.headline)
+                            TextEditor(text: $prompt)
+                                .frame(height: 38)
+                                .padding(.horizontal, 8.0)
+                                .padding(.vertical, 10.0)
+                                .background(Color(.textBackgroundColor))
+                                .cornerRadius(10.0)
+                        }
 
-                        TextEditor(text: $promptSuffix)
-                            .frame(height: 38)
-                            .padding(.horizontal, 8.0)
-                            .padding(.vertical, 10.0)
-                            .background(Color(.textBackgroundColor))
-                            .cornerRadius(10.0)
+                        VStack(alignment: .leading) {
+                            Text("Prompt Suffix")
+                                .font(.headline)
+
+                            TextEditor(text: $promptSuffix)
+                                .frame(height: 38)
+                                .padding(.horizontal, 8.0)
+                                .padding(.vertical, 10.0)
+                                .background(Color(.textBackgroundColor))
+                                .cornerRadius(10.0)
+                        }
                     }
                 }
             }
@@ -583,20 +626,23 @@ struct ContentView: View {
             if isFaceMode {
                 let emotions = await MainActor.run { emotionHistory }
                 let overlayMode2 = await MainActor.run { faceOverlayMode }
+                let aofPrompt = await MainActor.run { arrowsOnFacePrompt }
+                let aofSuffix = await MainActor.run { arrowsOnFaceSuffix }
                 var basePrompt: String
                 if overlayMode2 == .arrowsOnFace, vlmLandmarkHistory.count >= 2 {
                     let movement = FaceMovementArrowsOverlay.describeMovements(
                         old: vlmLandmarkHistory.first!,
                         new: vlmLandmarkHistory.last!)
-                    basePrompt = "Detected muscle movement: \(movement). Emotion?"
+                    basePrompt = "Detected muscle movement: \(movement). \(aofPrompt)"
                 } else {
                     basePrompt = prompt
                 }
+                let suffix = overlayMode2 == .arrowsOnFace ? aofSuffix : promptSuffix
                 if !emotions.isEmpty {
                     let prev = emotions.suffix(3).joined(separator: ", ")
-                    fullPrompt = "\(basePrompt) Previous: \(prev). Reply with ONLY the emotion word."
+                    fullPrompt = "\(basePrompt) Previous: \(prev). \(suffix)"
                 } else {
-                    fullPrompt = "\(basePrompt) Reply with ONLY the emotion word."
+                    fullPrompt = "\(basePrompt) \(suffix)"
                 }
                 print("[VLM DEBUG] prompt: \(fullPrompt)")
             } else {
@@ -778,26 +824,21 @@ struct ContentView: View {
 
         let fullPrompt: String
         let singleBasePrompt: String
-        if isFaceMode && currentOverlayMode == .arrowsOnFace && displayFaceHistory.count >= 2 {
+        let isAOF = isFaceMode && currentOverlayMode == .arrowsOnFace
+        if isAOF && displayFaceHistory.count >= 2 {
             let movement = FaceMovementArrowsOverlay.describeMovements(
                 old: displayFaceHistory.first!,
                 new: displayFaceHistory.last!)
-            singleBasePrompt = "Detected muscle movement: \(movement). Emotion?"
+            singleBasePrompt = "Detected muscle movement: \(movement). \(arrowsOnFacePrompt)"
         } else {
             singleBasePrompt = prompt
         }
-        if isFaceMode && currentOverlayMode == .arrowsOnFace {
-            if !emotionHistory.isEmpty {
-                let prev = emotionHistory.suffix(3).joined(separator: ", ")
-                fullPrompt = "\(singleBasePrompt) Previous: \(prev). Reply with ONLY the emotion word."
-            } else {
-                fullPrompt = "\(singleBasePrompt) Reply with ONLY the emotion word."
-            }
-        } else if isFaceMode && !emotionHistory.isEmpty {
+        let activeSuffix = isAOF ? arrowsOnFaceSuffix : promptSuffix
+        if isFaceMode && !emotionHistory.isEmpty {
             let prev = emotionHistory.suffix(3).joined(separator: ", ")
-            fullPrompt = "\(singleBasePrompt) Recent: \(prev). \(promptSuffix)"
+            fullPrompt = "\(singleBasePrompt) Previous: \(prev). \(activeSuffix)"
         } else if isFaceMode {
-            fullPrompt = "\(singleBasePrompt) \(promptSuffix)"
+            fullPrompt = "\(singleBasePrompt) \(activeSuffix)"
         } else {
             fullPrompt = "\(prompt) \(promptSuffix)"
         }
