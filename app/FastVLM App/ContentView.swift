@@ -584,9 +584,12 @@ struct ContentView: View {
             if isFaceMode {
                 let emotions = await MainActor.run { emotionHistory }
                 let overlayMode2 = await MainActor.run { faceOverlayMode }
-                let basePrompt: String
-                if overlayMode2 == .arrowsOnFace {
-                    basePrompt = "Green arrows show muscle movement. \(prompt)"
+                var basePrompt: String
+                if overlayMode2 == .arrowsOnFace, vlmLandmarkHistory.count >= 2 {
+                    let movement = FaceMovementArrowsOverlay.describeMovements(
+                        old: vlmLandmarkHistory.first!,
+                        new: vlmLandmarkHistory.last!)
+                    basePrompt = "Face muscles: \(movement). \(prompt)"
                 } else {
                     basePrompt = prompt
                 }
@@ -777,8 +780,11 @@ struct ContentView: View {
 
         let fullPrompt: String
         let singleBasePrompt: String
-        if isFaceMode && currentOverlayMode == .arrowsOnFace {
-            singleBasePrompt = "Green arrows show muscle movement. \(prompt)"
+        if isFaceMode && currentOverlayMode == .arrowsOnFace && displayFaceHistory.count >= 2 {
+            let movement = FaceMovementArrowsOverlay.describeMovements(
+                old: displayFaceHistory.first!,
+                new: displayFaceHistory.last!)
+            singleBasePrompt = "Face muscles: \(movement). \(prompt)"
         } else {
             singleBasePrompt = prompt
         }
@@ -1553,6 +1559,101 @@ private struct FaceMovementArrowsOverlay: View {
             if hypot(dx, dy) / eyeDist > 0.02 { return true }
         }
         return false
+    }
+
+    /// Produces a human-readable description of facial movements
+    /// (e.g. "lip corners up (smile), eyebrows raised, mouth opening").
+    static func describeMovements(
+        old: FaceLandmarkDisplayResult,
+        new: FaceLandmarkDisplayResult
+    ) -> String {
+        guard let oldFace = old.landmarks.first,
+              let newFace = new.landmarks.first,
+              oldFace.count >= 468, newFace.count >= 468 else { return "" }
+
+        guard let xform = headTransform(oldFace: oldFace, newFace: newFace) else {
+            return "large head movement"
+        }
+        guard let newEyes = eyeCenters(newFace) else { return "" }
+        let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                            newEyes.right.y - newEyes.left.y)
+        guard eyeDist > 1e-6 else { return "" }
+
+        func residual(for indices: [Int]) -> (dx: CGFloat, dy: CGFloat, mag: CGFloat)? {
+            guard let oldCtr = centroid(of: indices, in: oldFace),
+                  let newCtr = centroid(of: indices, in: newFace) else { return nil }
+            let expected = oldCtr.applying(xform)
+            let dx = newCtr.x - expected.x
+            let dy = newCtr.y - expected.y
+            let mag = hypot(dx, dy) / eyeDist
+            return mag > 0.02 ? (dx, dy, mag) : nil
+        }
+
+        var parts: [String] = []
+
+        // Eyebrows
+        let lBrow = [46, 53, 52, 65, 55, 107, 66, 105, 63, 70]
+        let rBrow = [276, 283, 282, 295, 285, 336, 296, 334, 293, 300]
+        if let lb = residual(for: lBrow), let rb = residual(for: rBrow) {
+            let avgDy = (lb.dy + rb.dy) / 2
+            if avgDy < -0.01 {
+                parts.append("eyebrows raised")
+            } else if avgDy > 0.01 {
+                parts.append("eyebrows lowered")
+            }
+        }
+
+        // Glabella (between eyebrows)
+        let glabella = [9, 151, 108, 69, 104, 68, 71]
+        if let g = residual(for: glabella) {
+            if g.dy > 0.01 {
+                parts.append("brow furrowing")
+            }
+        }
+
+        // Lip corners
+        let lipL = [61, 146, 91]
+        let lipR = [291, 375, 321]
+        if let ll = residual(for: lipL), let lr = residual(for: lipR) {
+            let avgDy = (ll.dy + lr.dy) / 2
+            if avgDy < -0.01 {
+                parts.append("lip corners up (smile)")
+            } else if avgDy > 0.01 {
+                parts.append("lip corners down (frown)")
+            }
+        }
+
+        // Upper/lower lip (mouth open/close)
+        let upperLip = [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308]
+        let lowerLip = [14, 87, 178, 88, 95, 317, 402, 318, 324]
+        if let ul = residual(for: upperLip), let ll = residual(for: lowerLip) {
+            let spread = ll.dy - ul.dy
+            if spread > 0.02 {
+                parts.append("mouth opening")
+            } else if spread < -0.02 {
+                parts.append("lips pressing together")
+            }
+        }
+
+        // Cheeks
+        let lCheek = [116, 117, 118, 119, 100, 126, 142, 36, 205]
+        let rCheek = [345, 346, 347, 348, 329, 355, 371, 266, 425]
+        if let lc = residual(for: lCheek), let rc = residual(for: rCheek) {
+            let avgDy = (lc.dy + rc.dy) / 2
+            if avgDy < -0.01 {
+                parts.append("cheeks raised")
+            }
+        }
+
+        // Chin
+        let chin = [152, 377, 400, 378, 379, 365, 397, 288, 361, 150, 149, 176, 148]
+        if let c = residual(for: chin) {
+            if c.dy > 0.02 {
+                parts.append("jaw dropping")
+            }
+        }
+
+        return parts.isEmpty ? "no significant movement" : parts.joined(separator: ", ")
     }
 
     // MARK: - Drawing
