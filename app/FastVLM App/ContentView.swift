@@ -107,7 +107,7 @@ struct ContentView: View {
                                 model.maxTokens = 240
                             }
                             if enabled {
-                                prompt = "What emotion? What head movement? Reply ONLY like: happy, tilting left"
+                                prompt = "This image shows face landmark dots and lines forming a face mesh. Based on the shape of the eyes, eyebrows, and mouth, what emotion is this? Reply with just the emotion and head tilt, like: happy, tilting left"
                                 promptSuffix = ""
                                 model.maxTokens = 12
                             }
@@ -772,16 +772,30 @@ struct ContentView: View {
         "excited", "calm", "smiling", "frowning", "worried"
     ]
 
+    private static let junkPrefixes = [
+        "the image depicts", "the image appears", "the image shows",
+        "this image depicts", "this image appears", "this image shows",
+        "the image is", "this is a", "i see a",
+    ]
+
     /// Extracts a short emotion + movement label from a VLM response.
-    /// If the response already matches "emotion, movement" format, returns as-is (trimmed).
-    /// Otherwise scans for known emotion keywords and returns up to ~6 words.
+    /// Returns empty string if the VLM clearly failed to interpret the image.
     static func extractEmotion(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
         let lower = trimmed.lowercased()
 
-        // If the response is already short (<=6 words), use it directly
+        // Reject responses where the VLM is describing the image instead
+        // of answering the emotion question
+        for prefix in junkPrefixes {
+            if lower.hasPrefix(prefix) {
+                return ""
+            }
+        }
+
         let allWords = trimmed.split(separator: " ")
+
+        // If short enough, use directly
         if allWords.count <= 6 {
             return trimmed
         }
@@ -791,15 +805,14 @@ struct ContentView: View {
         for (i, w) in lowerWords.enumerated() {
             let clean = w.trimmingCharacters(in: .punctuationCharacters)
             if knownEmotions.contains(clean) {
-                // Take this word and up to 3 words after it for context
                 let end = min(i + 4, allWords.count)
                 let slice = allWords[i..<end].joined(separator: " ")
                 return slice.trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
             }
         }
 
-        // Fallback: first 4 words
-        return allWords.prefix(4).joined(separator: " ")
+        // No known emotion found -- discard
+        return ""
     }
 }
 
