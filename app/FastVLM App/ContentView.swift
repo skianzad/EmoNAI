@@ -514,13 +514,14 @@ struct ContentView: View {
                 }
 
                 guard let rendered = FaceLandmarkOverlay.renderToImage(
-                    history: vlmLandmarkHistory
+                    history: vlmLandmarkHistory,
+                    drawArrows: arrowsOn
                 ) else {
                     print("[VLM DEBUG] renderToImage failed")
                     continue
                 }
                 imageForVLM = rendered
-                print("[VLM DEBUG] rendered \(vlmLandmarkHistory.count) ghosts, extent: \(rendered.extent)")
+                print("[VLM DEBUG] rendered \(vlmLandmarkHistory.count) ghosts, arrows=\(arrowsOn), extent: \(rendered.extent)")
                 debugSaveImage(rendered, tag: "vlm_input")
             } else {
                 vlmLandmarkHistory.removeAll()
@@ -682,12 +683,14 @@ struct ContentView: View {
         if isFaceMode {
             // Use the display history which is already populated by detectDisplayLandmarks
             let history = displayFaceHistory
-            if let rendered = FaceLandmarkOverlay.renderToImage(history: history) {
+            let arrowsOn = showMovementArrows
+            if let rendered = FaceLandmarkOverlay.renderToImage(
+                history: history, drawArrows: arrowsOn
+            ) {
                 imageForVLM = rendered
                 debugSaveImage(rendered, tag: "vlm_input_single")
-                print("[VLM DEBUG single] rendered \(history.count) ghosts")
+                print("[VLM DEBUG single] rendered \(history.count) ghosts, arrows=\(arrowsOn)")
             } else if let detection = faceLandmarker.detectObservation(in: frame) {
-                // Fallback: render just the current detection
                 if let rendered = FaceLandmarkOverlay.renderToImage(history: [detection]) {
                     imageForVLM = rendered
                 } else {
@@ -949,7 +952,8 @@ private struct FaceLandmarkOverlay: View {
     /// background — the same visualisation the user sees on screen.
     static func renderToImage(
         history: [FaceLandmarkDisplayResult],
-        referenceFace: [CGPoint]? = nil
+        referenceFace: [CGPoint]? = nil,
+        drawArrows: Bool = false
     ) -> CIImage? {
         let count = history.count
         guard count > 0 else { return nil }
@@ -1012,6 +1016,13 @@ private struct FaceLandmarkOverlay: View {
                     }
                 }
             }
+        }
+
+        if drawArrows, count >= 2,
+           let oldFace = history.first?.landmarks.first,
+           let newFace = history.last?.landmarks.first {
+            FaceMovementArrowsOverlay.drawArrowsCG(
+                ctx: ctx, oldFace: oldFace, newFace: newFace, size: s)
         }
 
         guard let cgImage = ctx.makeImage() else { return nil }
@@ -1224,6 +1235,80 @@ private struct FaceMovementArrowsOverlay: View {
         ("L.Jaw",      [172, 58, 132, 93, 234, 127],                             .teal),
         ("R.Jaw",      [401, 288, 361, 323, 454, 356],                           .teal),
     ]
+
+    // MARK: - CGContext arrow rendering (for VLM input image)
+
+    private static let cgFeatureColors: [(String, [Int], (r: CGFloat, g: CGFloat, b: CGFloat))] = [
+        ("L.Brow",     [46, 53, 52, 65, 55, 107, 66, 105, 63, 70],              (0.45, 0.3, 0.15)),
+        ("R.Brow",     [276, 283, 282, 295, 285, 336, 296, 334, 293, 300],       (0.45, 0.3, 0.15)),
+        ("Glabella",   [9, 151, 108, 69, 104, 68, 71],                           (0.5, 0.0, 0.5)),
+        ("L.Cheek",    [116, 117, 118, 119, 100, 126, 142, 36, 205],             (0.9, 0.4, 0.5)),
+        ("R.Cheek",    [345, 346, 347, 348, 329, 355, 371, 266, 425],            (0.9, 0.4, 0.5)),
+        ("Upper Lip",  [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308],      (0.8, 0.0, 0.0)),
+        ("Lower Lip",  [14, 87, 178, 88, 95, 317, 402, 318, 324],               (0.8, 0.0, 0.0)),
+        ("Lip L",      [61, 146, 91],                                             (0.9, 0.5, 0.0)),
+        ("Lip R",      [291, 375, 321],                                           (0.9, 0.5, 0.0)),
+        ("Chin",       [152, 377, 400, 378, 379, 365, 397, 288, 361, 150, 149, 176, 148], (0.3, 0.0, 0.5)),
+        ("L.Jaw",      [172, 58, 132, 93, 234, 127],                             (0.0, 0.5, 0.5)),
+        ("R.Jaw",      [401, 288, 361, 323, 454, 356],                           (0.0, 0.5, 0.5)),
+    ]
+
+    /// Draws movement arrows into a CGContext (for VLM input image rendering).
+    static func drawArrowsCG(
+        ctx: CGContext,
+        oldFace: [CGPoint],
+        newFace: [CGPoint],
+        size: CGFloat
+    ) {
+        guard oldFace.count >= 468, newFace.count >= 468 else { return }
+        guard let xform = headTransform(oldFace: oldFace, newFace: newFace) else { return }
+        guard let newEyes = eyeCenters(newFace) else { return }
+        let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                            newEyes.right.y - newEyes.left.y)
+        guard eyeDist > 1e-6 else { return }
+
+        func toPixel(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x * size, y: p.y * size)
+        }
+
+        for (_, indices, color) in cgFeatureColors {
+            guard let oldCtr = centroid(of: indices, in: oldFace),
+                  let newCtr = centroid(of: indices, in: newFace) else { continue }
+            let expected = oldCtr.applying(xform)
+            let dx = newCtr.x - expected.x
+            let dy = newCtr.y - expected.y
+            let normMag = hypot(dx, dy) / eyeDist
+            guard normMag > 0.02 else { continue }
+
+            let arrowScale: CGFloat = size * 3.0
+            let origin = toPixel(newCtr)
+            let tip = CGPoint(x: origin.x + dx * arrowScale,
+                              y: origin.y + dy * arrowScale)
+
+            let shaftLen = hypot(tip.x - origin.x, tip.y - origin.y)
+            guard shaftLen > 3 else { continue }
+
+            ctx.setStrokeColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0)
+            ctx.setLineWidth(2.5)
+            ctx.beginPath()
+            ctx.move(to: origin)
+            ctx.addLine(to: tip)
+            ctx.strokePath()
+
+            let headLen: CGFloat = min(12, shaftLen * 0.35)
+            let angle = atan2(tip.y - origin.y, tip.x - origin.x)
+            let spread: CGFloat = .pi / 6
+            ctx.setFillColor(red: color.r, green: color.g, blue: color.b, alpha: 1.0)
+            ctx.beginPath()
+            ctx.move(to: tip)
+            ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle - spread),
+                                    y: tip.y - headLen * sin(angle - spread)))
+            ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle + spread),
+                                    y: tip.y - headLen * sin(angle + spread)))
+            ctx.closePath()
+            ctx.fillPath()
+        }
+    }
 
     // MARK: - Movement detection (used to gate VLM inference)
 
