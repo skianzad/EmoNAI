@@ -119,6 +119,8 @@ class FastVLMModel {
 
                     var seenFirstToken = false
 
+                    print("[PERF] prompt tokens: \(input.text.tokens.size), maxTokens: \(currentMaxTokens)")
+
                     let result = try MLXLMCommon.generate(
                         input: input, parameters: generateParameters, context: context
                     ) { tokens in
@@ -154,8 +156,8 @@ class FastVLMModel {
                         }
                     }
                     let text = result.output
+                    print("[PERF] generated \(result.tokens.count) tokens, output: \(text.prefix(60))")
 
-                    // Aggressively free GPU memory between generations
                     MLX.GPU.set(cacheLimit: 0)
                     MLX.GPU.clearCache()
                     MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
