@@ -45,8 +45,10 @@ chmod +x app/get_pretrained_mlx_model.sh
 2. Download FastVLM
 
 ```shell
-app/get_pretrained_mlx_model.sh --model 0.5b --dest app/FastVLM/model
+app/get_pretrained_mlx_model.sh --model 1.5b --dest app/FastVLM/model
 ```
+
+**Memory:** On iPhone and many iPads, the **7B** checkpoint is large enough that the OS may terminate the app (debugger exit **code 9**) during load or first inference. Prefer **1.5B** (or **0.5B**) on device; reserve **7B** for macOS with plenty of unified memory, or profile first.
 
 3. Open the app in Xcode, Build, and Run.
 

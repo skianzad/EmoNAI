@@ -5,6 +5,7 @@
 
 import AVFoundation
 import MLXLMCommon
+import NaturalLanguage
 import SwiftUI
 import Video
 
@@ -25,9 +26,12 @@ struct ContentView: View {
     @State private var framesToDisplay: AsyncStream<CVImageBuffer>?
 
     @State private var prompt = "Describe the image in English."
-    @State private var promptSuffix = "Output should be brief, about 15 words or less."
-    @State private var arrowsOnFacePrompt = "Emotion?"
-    @State private var arrowsOnFaceSuffix = "Reply with ONLY the emotion word."
+    @State private var promptSuffix =
+        "Give one short sentence of reasoning, then your conclusion. About 25 words total."
+    @State private var arrowsOnFacePrompt =
+        "What emotion fits the movement cues? Explain briefly, then state the emotion."
+    @State private var arrowsOnFaceSuffix =
+        "Use 2–4 sentences: reasoning first, then end with a single emotion word on the last line."
 
     @State private var isShowingInfo: Bool = false
 
@@ -44,12 +48,15 @@ struct ContentView: View {
     /// Rolling history of landmark snapshots for the ghost trail.
     @State private var displayFaceHistory: [FaceLandmarkDisplayResult] = []
     /// How many ghost snapshots to keep (user-adjustable, 1–10).
-    @State private var maxGhostCount: Int = 5
+    @State private var maxGhostCount: Int = 2
     /// Seconds between freezing a new ghost snapshot (user-adjustable).
-    @State private var snapshotInterval: Double = 1.0
+    @State private var snapshotInterval: Double = 3.0
 
     /// Rolling history of VLM emotion responses for change-detection prompting.
     @State private var emotionHistory: [String] = []
+
+    /// `NLTagger` sentiment (`.sentimentScore`) of the latest model output.
+    @State private var responseSentimentLabel: String = ""
 
     /// Face landmark display mode when face landmark mode is enabled.
     enum FaceOverlayMode: Int, CaseIterable {
@@ -58,10 +65,6 @@ struct ContentView: View {
         case arrowsOnFace = 2 // faded camera frame + movement arrows (sent to VLM)
     }
     @State private var faceOverlayMode: FaceOverlayMode = .ghosts
-
-    /// Captured neutral/resting face landmarks used as absolute reference
-    /// for movement arrows and VLM movement descriptions.
-    @State private var neutralFaceBaseline: FaceLandmarkDisplayResult? = nil
 
     /// Last image sent to the VLM, shown as a debug thumbnail.
     @State private var lastVLMInputImage: CGImage? = nil
@@ -116,13 +119,13 @@ struct ContentView: View {
                             if !enabled {
                                 displayFaceHistory.removeAll()
                                 emotionHistory.removeAll()
-                                neutralFaceBaseline = nil
+                                responseSentimentLabel = ""
                                 model.maxTokens = 40
                             }
                             if enabled {
                                 prompt = "What emotion is this face showing?"
-                                promptSuffix = "One word: happy, sad, angry, surprised, fearful, disgusted, or neutral. Under 15 words."
-                                model.maxTokens = 50
+                                promptSuffix = "First explain briefly what in the landmark view supports your read (mouth, brows, eyes). Then name the emotion (happy, sad, angry, surprised, fearful, disgusted, or neutral). Put the emotion word alone on the last line."
+                                model.maxTokens = 80
                             }
                         }
 
@@ -152,16 +155,6 @@ struct ContentView: View {
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 140)
-
-                                Button {
-                                    if let latest = displayFaceHistory.last {
-                                        neutralFaceBaseline = latest
-                                    }
-                                } label: {
-                                    Image(systemName: neutralFaceBaseline != nil
-                                          ? "face.smiling.inverse" : "face.smiling")
-                                        .foregroundStyle(neutralFaceBaseline != nil ? .green : .gray)
-                                }
 
                                 Button {
                                     showVLMDebugThumbnail.toggle()
@@ -197,45 +190,48 @@ struct ContentView: View {
                                     if faceLandmarkModeEnabled,
                                        faceOverlayMode != .arrowsOnFace {
                                         Color.white
+                                            .allowsHitTesting(false)
                                     }
                                 }
                                 .overlay {
                                     if faceLandmarkModeEnabled,
                                        faceOverlayMode == .arrowsOnFace {
                                         Color.black.opacity(0.3)
+                                            .allowsHitTesting(false)
                                     }
                                 }
                                 .overlay {
-                                    if faceLandmarkModeEnabled,
-                                       !displayFaceHistory.isEmpty {
-                                        switch faceOverlayMode {
-                                        case .ghosts:
-                                            FaceLandmarkOverlay(
-                                                history: displayFaceHistory)
-                                        case .arrows:
-                                            FaceLandmarkOverlay(
-                                                history: [displayFaceHistory.last!],
-                                                referenceFace: displayFaceHistory.count >= 2
-                                                    ? displayFaceHistory.first!.landmarks.first
-                                                    : nil)
-                                        case .arrowsOnFace:
-                                            EmptyView()
+                                    Group {
+                                        if faceLandmarkModeEnabled,
+                                           !displayFaceHistory.isEmpty {
+                                            switch faceOverlayMode {
+                                            case .ghosts:
+                                                FaceLandmarkOverlay(
+                                                    history: displayFaceHistory)
+                                            case .arrows:
+                                                FaceLandmarkOverlay(
+                                                    history: [displayFaceHistory.last!],
+                                                    referenceFace: displayFaceHistory.count >= 2
+                                                        ? displayFaceHistory.first!.landmarks.first
+                                                        : nil)
+                                            case .arrowsOnFace:
+                                                EmptyView()
+                                            }
                                         }
                                     }
+                                    .allowsHitTesting(false)
                                 }
                                 .overlay {
-                                    if faceLandmarkModeEnabled,
-                                       faceOverlayMode != .ghosts,
-                                       !displayFaceHistory.isEmpty {
-                                        let reference = neutralFaceBaseline
-                                            ?? (displayFaceHistory.count >= 2
-                                                ? displayFaceHistory.first! : nil)
-                                        if let reference {
+                                    Group {
+                                        if faceLandmarkModeEnabled,
+                                           faceOverlayMode != .ghosts,
+                                           displayFaceHistory.count >= 2 {
                                             FaceMovementArrowsOverlay(
-                                                oldSnapshot: reference,
+                                                oldSnapshot: displayFaceHistory.first!,
                                                 newSnapshot: displayFaceHistory.last!)
                                         }
                                     }
+                                    .allowsHitTesting(false)
                                 }
                                 .overlay(alignment: .bottomTrailing) {
                                     if showVLMDebugThumbnail,
@@ -265,12 +261,14 @@ struct ContentView: View {
                                     }
                                 }
                                 #if !os(macOS)
-                                .overlay(alignment: .topTrailing) {
-                                    CameraControlsView(
-                                        backCamera: $camera.backCamera,
-                                        device: $camera.device,
-                                        devices: $camera.devices)
-                                    .padding()
+                                .overlay(alignment: .topLeading) {
+                                    if !faceLandmarkModeEnabled {
+                                        CameraControlsView(
+                                            backCamera: $camera.backCamera,
+                                            device: $camera.device,
+                                            devices: $camera.devices)
+                                        .padding()
+                                    }
                                 }
                                 #endif
                                 .overlay(alignment: .bottom) {
@@ -333,16 +331,24 @@ struct ContentView: View {
                             .controlSize(.large)
                             .frame(maxWidth: .infinity)
                     } else {
-                        ScrollView {
-                            Text(model.output)
-                                .foregroundStyle(isEditingPrompt ? .secondary : .primary)
-                                .textSelection(.enabled)
-                                #if os(macOS)
-                                .font(.headline)
-                                .fontWeight(.regular)
-                                #endif
+                        VStack(alignment: .leading, spacing: 6) {
+                            ScrollView {
+                                Text(model.output)
+                                    .foregroundStyle(isEditingPrompt ? .secondary : .primary)
+                                    .textSelection(.enabled)
+                                    #if os(macOS)
+                                    .font(.headline)
+                                    .fontWeight(.regular)
+                                    #endif
+                            }
+                            .frame(minHeight: 50.0, maxHeight: 200.0)
+
+                            if !responseSentimentLabel.isEmpty {
+                                Text(responseSentimentLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        .frame(minHeight: 50.0, maxHeight: 200.0)
                     }
                 } header: {
                     Text("Response")
@@ -420,21 +426,25 @@ struct ContentView: View {
                         Menu {
                             Button("Describe image") {
                                 prompt = "Describe the image in English."
-                                promptSuffix = "Output should be brief, about 15 words or less."
+                                promptSuffix =
+                                    "Give one short sentence of reasoning, then your conclusion. About 25 words total."
                             }
                             Button("Facial expression") {
                                 prompt = "What is this person's facial expression?"
-                                promptSuffix = "Output only one or two words."
+                                promptSuffix =
+                                    "Give one short sentence why, then one or two words for the expression."
                             }
                             Button("Face landmarks — emotion") {
                                 faceLandmarkModeEnabled = true
                                 prompt = "Name the exact emotion on this face."
-                                promptSuffix = "One or two words only. Example: happy. Do not describe the image."
+                                promptSuffix =
+                                    "Briefly cite what you see in the landmark drawing, then put the emotion alone on the last line."
                             }
                             Button("Face landmarks — movement") {
                                 faceLandmarkModeEnabled = true
                                 prompt = "Name the exact emotion on this face and any head tilt or turn."
-                                promptSuffix = "Format: <emotion>, <movement>. Example: happy, tilting left. Do not describe the image."
+                                promptSuffix =
+                                    "Brief reasoning first, then a line like: emotion, movement (e.g. happy, tilting left)."
                             }
                             Button("Read text") {
                                 prompt = "What is written in this image?"
@@ -607,13 +617,11 @@ struct ContentView: View {
                 }
 
                 let overlayMode = await MainActor.run { faceOverlayMode }
-                let baseline = await MainActor.run { neutralFaceBaseline }
                 let arrowsOn = overlayMode == .arrows || overlayMode == .arrowsOnFace
-                let arrowRef = baseline ?? vlmLandmarkHistory.first
-                if arrowsOn, let arrowRef, !vlmLandmarkHistory.isEmpty {
+                if arrowsOn, let firstSnap = vlmLandmarkHistory.first,
+                   !vlmLandmarkHistory.isEmpty {
                     let hasMovement = FaceMovementArrowsOverlay.hasMeaningfulMovement(
-                        old: arrowRef,
-                        new: vlmLandmarkHistory.last!)
+                        old: firstSnap, new: vlmLandmarkHistory.last!)
                     if !hasMovement {
                         print("[VLM DEBUG] no meaningful movement — skipping VLM")
                         continue
@@ -653,12 +661,11 @@ struct ContentView: View {
                 let aofPrompt = await MainActor.run { arrowsOnFacePrompt }
                 let aofSuffix = await MainActor.run { arrowsOnFaceSuffix }
                 var basePrompt: String
-                let vlmBaseline = await MainActor.run { neutralFaceBaseline }
-                let movementRef = vlmBaseline ?? vlmLandmarkHistory.first
-                if overlayMode2 == .arrowsOnFace, let movementRef, !vlmLandmarkHistory.isEmpty {
+                if overlayMode2 == .arrowsOnFace,
+                   let firstSnap = vlmLandmarkHistory.first,
+                   !vlmLandmarkHistory.isEmpty {
                     let movement = FaceMovementArrowsOverlay.describeMovements(
-                        old: movementRef,
-                        new: vlmLandmarkHistory.last!)
+                        old: firstSnap, new: vlmLandmarkHistory.last!)
                     basePrompt = "Detected muscle movement: \(movement). \(aofPrompt)"
                 } else {
                     basePrompt = prompt
@@ -683,12 +690,18 @@ struct ContentView: View {
             let t = await model.generate(userInput)
             _ = await t.result
 
+            let outputText = await MainActor.run {
+                model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let sentimentLine = Self.appleSentimentSummary(for: outputText)
+            await MainActor.run { responseSentimentLabel = sentimentLine }
+            if !sentimentLine.isEmpty {
+                print("[VLM DEBUG] \(sentimentLine)")
+            }
+
             if isFaceMode {
-                let rawEmotion = await MainActor.run {
-                    model.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                print("[VLM DEBUG] response: \(rawEmotion)")
-                let emotion = Self.extractEmotion(from: rawEmotion)
+                print("[VLM DEBUG] response: \(outputText)")
+                let emotion = Self.extractEmotion(from: outputText)
                 if !emotion.isEmpty {
                     await MainActor.run {
                         emotionHistory.append(emotion)
@@ -807,6 +820,7 @@ struct ContentView: View {
     func processSingleFrame(_ frame: CVImageBuffer) {
         Task { @MainActor in
             model.output = ""
+            responseSentimentLabel = ""
         }
 
         let isFaceMode = faceLandmarkModeEnabled
@@ -851,11 +865,10 @@ struct ContentView: View {
         let fullPrompt: String
         let singleBasePrompt: String
         let isAOF = isFaceMode && currentOverlayMode == .arrowsOnFace
-        let singleRef = neutralFaceBaseline ?? displayFaceHistory.first
-        if isAOF, let singleRef, !displayFaceHistory.isEmpty {
+        if isAOF, let firstSnap = displayFaceHistory.first,
+           !displayFaceHistory.isEmpty {
             let movement = FaceMovementArrowsOverlay.describeMovements(
-                old: singleRef,
-                new: displayFaceHistory.last!)
+                old: firstSnap, new: displayFaceHistory.last!)
             singleBasePrompt = "Detected muscle movement: \(movement). \(arrowsOnFacePrompt)"
         } else {
             singleBasePrompt = prompt
@@ -878,17 +891,55 @@ struct ContentView: View {
         Task {
             let t = await model.generate(userInput)
             _ = await t.result
+            let raw = await MainActor.run {
+                model.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let sentimentLine = Self.appleSentimentSummary(for: raw)
+            await MainActor.run { responseSentimentLabel = sentimentLine }
             if isFaceMode {
-                let raw = model.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 let emotion = Self.extractEmotion(from: raw)
                 if !emotion.isEmpty {
-                    emotionHistory.append(emotion)
-                    if emotionHistory.count > 5 {
-                        emotionHistory.removeFirst(emotionHistory.count - 5)
+                    await MainActor.run {
+                        emotionHistory.append(emotion)
+                        if emotionHistory.count > 5 {
+                            emotionHistory.removeFirst(emotionHistory.count - 5)
+                        }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Natural Language (Apple built-in sentiment)
+
+    /// Uses `NLTagger` with `.sentimentScore` on the model’s full reply.
+    private static func appleSentimentSummary(for text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let tagger = NLTagger(tagSchemes: [.sentimentScore])
+        tagger.string = trimmed
+        let (tag, _) = tagger.tag(
+            at: trimmed.startIndex,
+            unit: .paragraph,
+            scheme: .sentimentScore
+        )
+        guard let tag else {
+            return "Apple NL sentiment: unavailable"
+        }
+        // Sentiment is exposed as `NLTag` string raw values (e.g. "Positive"),
+        // not always as static members across SDKs.
+        let raw = tag.rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let label: String
+        switch raw {
+        case "positive": label = "positive"
+        case "negative": label = "negative"
+        case "neutral": label = "neutral"
+        default:
+            label = raw.isEmpty ? "unknown" : raw
+        }
+        return "Apple NL sentiment: \(label)"
     }
 
     // MARK: - Emotion extraction
@@ -907,7 +958,8 @@ struct ContentView: View {
     ]
 
     /// Extracts a short emotion label from a VLM response.
-    /// Always tries to find a known emotion keyword first and returns just that word.
+    /// Prefers the last non-empty line (for “reasoning then emotion” replies),
+    /// then scans the full text for a known emotion keyword.
     static func extractEmotion(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
@@ -917,15 +969,21 @@ struct ContentView: View {
             if lower.hasPrefix(prefix) { return "" }
         }
 
-        // Always scan for a known emotion keyword and return just that word
-        for w in lower.split(separator: " ") {
-            let clean = String(w).trimmingCharacters(in: .punctuationCharacters)
-            if knownEmotions.contains(clean) {
-                return clean
+        func firstKnownEmotion(in text: String) -> String? {
+            let l = text.lowercased()
+            for w in l.split(whereSeparator: { $0.isWhitespace || $0.isNewline }) {
+                let clean = String(w).trimmingCharacters(in: .punctuationCharacters)
+                if knownEmotions.contains(clean) { return clean }
             }
+            return nil
         }
 
-        // If the response is a single short word, keep it
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let last = lines.last, let e = firstKnownEmotion(in: last) { return e }
+
+        if let e = firstKnownEmotion(in: trimmed) { return e }
+
         let allWords = trimmed.split(separator: " ")
         if allWords.count == 1 { return trimmed }
 
@@ -1158,7 +1216,8 @@ private struct FaceLandmarkOverlay: View {
     static func renderToImage(
         history: [FaceLandmarkDisplayResult],
         referenceFace: [CGPoint]? = nil,
-        drawArrows: Bool = false
+        drawArrows: Bool = false,
+        normalizedBaseline: [CGPoint]? = nil
     ) -> CIImage? {
         let count = history.count
         guard count > 0 else { return nil }
@@ -1223,11 +1282,11 @@ private struct FaceLandmarkOverlay: View {
             }
         }
 
-        if drawArrows, count >= 2,
-           let oldFace = history.first?.landmarks.first,
-           let newFace = history.last?.landmarks.first {
+        if drawArrows, let newFace = history.last?.landmarks.first {
+            let oldFace = history.first?.landmarks.first ?? newFace
             FaceMovementArrowsOverlay.drawArrowsCG(
-                ctx: ctx, oldFace: oldFace, newFace: newFace, size: s)
+                ctx: ctx, oldFace: oldFace, newFace: newFace, size: s,
+                normalizedBaseline: normalizedBaseline)
         }
 
         guard let cgImage = ctx.makeImage() else { return nil }
@@ -1394,12 +1453,43 @@ private struct FaceLandmarkOverlay: View {
 private struct FaceMovementArrowsOverlay: View {
     let oldSnapshot: FaceLandmarkDisplayResult
     let newSnapshot: FaceLandmarkDisplayResult
+    /// When set, comparison uses normalised space (head-pose-invariant).
+    var normalizedBaseline: [CGPoint]? = nil
 
     var body: some View {
         Canvas { ctx, size in
             draw(ctx: ctx, size: size)
         }
         .allowsHitTesting(false)
+    }
+
+    // MARK: - Normalisation
+
+    /// Maps landmarks to a face-relative coordinate system:
+    /// origin = midpoint between eyes, scale = 1 / inter-eye distance,
+    /// eye line rotated to horizontal.  Results are invariant to head
+    /// translation, rotation and distance from camera.
+    static func normalizeFace(_ face: [CGPoint]) -> [CGPoint]? {
+        guard face.count >= 468 else { return nil }
+        guard let eyes = eyeCenters(face) else { return nil }
+
+        let mid = CGPoint(x: (eyes.left.x + eyes.right.x) / 2,
+                          y: (eyes.left.y + eyes.right.y) / 2)
+        let dx = eyes.right.x - eyes.left.x
+        let dy = eyes.right.y - eyes.left.y
+        let dist = hypot(dx, dy)
+        guard dist > 1e-6 else { return nil }
+
+        let angle = atan2(dy, dx)
+        let cosA = cos(-angle) / dist
+        let sinA = sin(-angle) / dist
+
+        return face.map { p in
+            let cx = p.x - mid.x
+            let cy = p.y - mid.y
+            return CGPoint(x: cx * cosA - cy * sinA,
+                           y: cx * sinA + cy * cosA)
+        }
     }
 
     // MARK: - Geometry helpers
@@ -1508,10 +1598,10 @@ private struct FaceMovementArrowsOverlay: View {
         ctx: CGContext,
         oldFace: [CGPoint],
         newFace: [CGPoint],
-        size: CGFloat
+        size: CGFloat,
+        normalizedBaseline: [CGPoint]? = nil
     ) {
-        guard oldFace.count >= 468, newFace.count >= 468 else { return }
-        guard let xform = headTransform(oldFace: oldFace, newFace: newFace) else { return }
+        guard newFace.count >= 468 else { return }
         guard let newEyes = eyeCenters(newFace) else { return }
         let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
                             newEyes.right.y - newEyes.left.y)
@@ -1523,42 +1613,76 @@ private struct FaceMovementArrowsOverlay: View {
 
         let arrowR: CGFloat = 0.0, arrowG: CGFloat = 0.9, arrowB: CGFloat = 0.2
 
-        for (_, indices, _) in cgFeatureColors {
-            guard let oldCtr = centroid(of: indices, in: oldFace),
-                  let newCtr = centroid(of: indices, in: newFace) else { continue }
-            let expected = oldCtr.applying(xform)
-            let dx = newCtr.x - expected.x
-            let dy = newCtr.y - expected.y
-            let normMag = hypot(dx, dy) / eyeDist
-            guard normMag > 0.02 else { continue }
+        if let baseline = normalizedBaseline,
+           let curNorm = normalizeFace(newFace) {
+            for (_, indices, _) in cgFeatureColors {
+                guard let baseCtr = centroid(of: indices, in: baseline),
+                      let curCtr = centroid(of: indices, in: curNorm),
+                      let newCtr = centroid(of: indices, in: newFace) else { continue }
+                let dx = curCtr.x - baseCtr.x
+                let dy = curCtr.y - baseCtr.y
+                guard hypot(dx, dy) > 0.02 else { continue }
 
-            let arrowScale: CGFloat = size * 3.0
-            let origin = toPixel(newCtr)
-            let tip = CGPoint(x: origin.x + dx * arrowScale,
-                              y: origin.y + dy * arrowScale)
+                let displayDx = dx * eyeDist
+                let displayDy = dy * eyeDist
+                let arrowScale: CGFloat = size * 3.0
+                let origin = toPixel(newCtr)
+                let tip = CGPoint(x: origin.x + displayDx * arrowScale,
+                                  y: origin.y + displayDy * arrowScale)
 
-            let shaftLen = hypot(tip.x - origin.x, tip.y - origin.y)
-            guard shaftLen > 3 else { continue }
+                let shaftLen = hypot(tip.x - origin.x, tip.y - origin.y)
+                guard shaftLen > 3 else { continue }
 
-            ctx.setStrokeColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
-            ctx.setLineWidth(2.5)
-            ctx.beginPath()
-            ctx.move(to: origin)
-            ctx.addLine(to: tip)
-            ctx.strokePath()
+                ctx.setStrokeColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
+                ctx.setLineWidth(2.5)
+                ctx.beginPath(); ctx.move(to: origin); ctx.addLine(to: tip); ctx.strokePath()
 
-            let headLen: CGFloat = min(12, shaftLen * 0.35)
-            let angle = atan2(tip.y - origin.y, tip.x - origin.x)
-            let spread: CGFloat = .pi / 6
-            ctx.setFillColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
-            ctx.beginPath()
-            ctx.move(to: tip)
-            ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle - spread),
-                                    y: tip.y - headLen * sin(angle - spread)))
-            ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle + spread),
-                                    y: tip.y - headLen * sin(angle + spread)))
-            ctx.closePath()
-            ctx.fillPath()
+                let headLen: CGFloat = min(12, shaftLen * 0.35)
+                let angle = atan2(tip.y - origin.y, tip.x - origin.x)
+                let spread: CGFloat = .pi / 6
+                ctx.setFillColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
+                ctx.beginPath(); ctx.move(to: tip)
+                ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle - spread),
+                                        y: tip.y - headLen * sin(angle - spread)))
+                ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle + spread),
+                                        y: tip.y - headLen * sin(angle + spread)))
+                ctx.closePath(); ctx.fillPath()
+            }
+        } else {
+            guard oldFace.count >= 468 else { return }
+            guard let xform = headTransform(oldFace: oldFace, newFace: newFace) else { return }
+
+            for (_, indices, _) in cgFeatureColors {
+                guard let oldCtr = centroid(of: indices, in: oldFace),
+                      let newCtr = centroid(of: indices, in: newFace) else { continue }
+                let expected = oldCtr.applying(xform)
+                let dx = newCtr.x - expected.x
+                let dy = newCtr.y - expected.y
+                guard hypot(dx, dy) / eyeDist > 0.02 else { continue }
+
+                let arrowScale: CGFloat = size * 3.0
+                let origin = toPixel(newCtr)
+                let tip = CGPoint(x: origin.x + dx * arrowScale,
+                                  y: origin.y + dy * arrowScale)
+
+                let shaftLen = hypot(tip.x - origin.x, tip.y - origin.y)
+                guard shaftLen > 3 else { continue }
+
+                ctx.setStrokeColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
+                ctx.setLineWidth(2.5)
+                ctx.beginPath(); ctx.move(to: origin); ctx.addLine(to: tip); ctx.strokePath()
+
+                let headLen: CGFloat = min(12, shaftLen * 0.35)
+                let angle = atan2(tip.y - origin.y, tip.x - origin.x)
+                let spread: CGFloat = .pi / 6
+                ctx.setFillColor(red: arrowR, green: arrowG, blue: arrowB, alpha: 1.0)
+                ctx.beginPath(); ctx.move(to: tip)
+                ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle - spread),
+                                        y: tip.y - headLen * sin(angle - spread)))
+                ctx.addLine(to: CGPoint(x: tip.x - headLen * cos(angle + spread),
+                                        y: tip.y - headLen * sin(angle + spread)))
+                ctx.closePath(); ctx.fillPath()
+            }
         }
     }
 
@@ -1688,28 +1812,98 @@ private struct FaceMovementArrowsOverlay: View {
         return parts.isEmpty ? "no significant movement" : parts.joined(separator: ", ")
     }
 
+    // MARK: - Normalised-baseline variants
+
+    /// Like `hasMeaningfulMovement` but compares a pre-normalised baseline
+    /// against the current raw face, so head movement is factored out.
+    static func hasMeaningfulMovementNorm(
+        baseline: [CGPoint],
+        currentFace: [CGPoint]
+    ) -> Bool {
+        guard let curNorm = normalizeFace(currentFace) else { return false }
+
+        for (_, indices, _) in featureGroups {
+            guard let baseCtr = centroid(of: indices, in: baseline),
+                  let curCtr = centroid(of: indices, in: curNorm) else { continue }
+            if hypot(curCtr.x - baseCtr.x, curCtr.y - baseCtr.y) > 0.02 { return true }
+        }
+        return false
+    }
+
+    /// Like `describeMovements` but compares a pre-normalised baseline
+    /// against the current raw face.
+    static func describeMovementsNorm(
+        baseline: [CGPoint],
+        currentFace: [CGPoint]
+    ) -> String {
+        guard let curNorm = normalizeFace(currentFace) else { return "" }
+
+        func residual(for indices: [Int]) -> (dx: CGFloat, dy: CGFloat, mag: CGFloat)? {
+            guard let baseCtr = centroid(of: indices, in: baseline),
+                  let curCtr = centroid(of: indices, in: curNorm) else { return nil }
+            let dx = curCtr.x - baseCtr.x
+            let dy = curCtr.y - baseCtr.y
+            let mag = hypot(dx, dy)
+            return mag > 0.02 ? (dx, dy, mag) : nil
+        }
+
+        var parts: [String] = []
+
+        let lBrow = [46, 53, 52, 65, 55, 107, 66, 105, 63, 70]
+        let rBrow = [276, 283, 282, 295, 285, 336, 296, 334, 293, 300]
+        if let lb = residual(for: lBrow), let rb = residual(for: rBrow) {
+            let avgDy = (lb.dy + rb.dy) / 2
+            if avgDy < -0.01 { parts.append("eyebrows raised") }
+            else if avgDy > 0.01 { parts.append("eyebrows lowered") }
+        }
+
+        let glabella = [9, 151, 108, 69, 104, 68, 71]
+        if let g = residual(for: glabella), g.dy > 0.01 {
+            parts.append("brow furrowing")
+        }
+
+        let lipL = [61, 146, 91]
+        let lipR = [291, 375, 321]
+        if let ll = residual(for: lipL), let lr = residual(for: lipR) {
+            let avgDy = (ll.dy + lr.dy) / 2
+            if avgDy < -0.01 { parts.append("lip corners up (smile)") }
+            else if avgDy > 0.01 { parts.append("lip corners down (frown)") }
+        }
+
+        let upperLip = [13, 82, 81, 80, 191, 78, 312, 311, 310, 415, 308]
+        let lowerLip = [14, 87, 178, 88, 95, 317, 402, 318, 324]
+        if let ul = residual(for: upperLip), let ll = residual(for: lowerLip) {
+            let spread = ll.dy - ul.dy
+            if spread > 0.02 { parts.append("mouth opening") }
+            else if spread < -0.02 { parts.append("lips pressing together") }
+        }
+
+        let lCheek = [116, 117, 118, 119, 100, 126, 142, 36, 205]
+        let rCheek = [345, 346, 347, 348, 329, 355, 371, 266, 425]
+        if let lc = residual(for: lCheek), let rc = residual(for: rCheek) {
+            let avgDy = (lc.dy + rc.dy) / 2
+            if avgDy < -0.01 { parts.append("cheeks raised") }
+        }
+
+        let chin = [152, 377, 400, 378, 379, 365, 397, 288, 361, 150, 149, 176, 148]
+        if let c = residual(for: chin), c.dy > 0.02 {
+            parts.append("jaw dropping")
+        }
+
+        return parts.isEmpty ? "no significant movement" : parts.joined(separator: ", ")
+    }
+
     // MARK: - Drawing
 
     private func draw(ctx: GraphicsContext, size: CGSize) {
-        guard let oldFace = oldSnapshot.landmarks.first,
-              let newFace = newSnapshot.landmarks.first,
-              oldFace.count >= 468, newFace.count >= 468 else { return }
+        guard let newFace = newSnapshot.landmarks.first,
+              newFace.count >= 468 else { return }
 
         let imgW = newSnapshot.imageSize.width
         let imgH = newSnapshot.imageSize.height
         guard imgW > 0, imgH > 0 else { return }
 
-        guard let xform = Self.headTransform(oldFace: oldFace, newFace: newFace) else {
-            return  // head moved too much — suppress arrows
-        }
-
-        // Inter-eye distance in the new frame for thresholding
-        guard let newEyes = Self.eyeCenters(newFace) else { return }
-        let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
-                            newEyes.right.y - newEyes.left.y)
-        guard eyeDist > 1e-6 else { return }
-
-        // resizeAspectFill mapping
+        // resizeAspectFill mapping (current frame → view)
         let scaleX = size.width / imgW
         let scaleY = size.height / imgH
         let viewScale = max(scaleX, scaleY)
@@ -1724,24 +1918,62 @@ private struct FaceMovementArrowsOverlay: View {
 
         let arrowColor = Color(red: 0, green: 0.9, blue: 0.2)
 
-        for (_, indices, _) in Self.featureGroups {
-            guard let oldCtr = Self.centroid(of: indices, in: oldFace),
-                  let newCtr = Self.centroid(of: indices, in: newFace) else { continue }
+        if let baseline = normalizedBaseline,
+           let curNorm = Self.normalizeFace(newFace) {
+            // Normalised comparison — fully head-pose-invariant
+            guard let newEyes = Self.eyeCenters(newFace) else { return }
+            let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                                newEyes.right.y - newEyes.left.y)
+            guard eyeDist > 1e-6 else { return }
 
-            let expected = oldCtr.applying(xform)
-            let dx = newCtr.x - expected.x
-            let dy = newCtr.y - expected.y
+            for (_, indices, _) in Self.featureGroups {
+                guard let baseCtr = Self.centroid(of: indices, in: baseline),
+                      let curCtr = Self.centroid(of: indices, in: curNorm),
+                      let newCtr = Self.centroid(of: indices, in: newFace) else { continue }
 
-            let normMag = hypot(dx, dy) / eyeDist
-            guard normMag > 0.02 else { continue }
+                let dx = curCtr.x - baseCtr.x
+                let dy = curCtr.y - baseCtr.y
+                guard hypot(dx, dy) > 0.02 else { continue }
 
-            let arrowScale: CGFloat = min(size.width, size.height) * 3.0
-            let origin = toView(newCtr)
-            let tip = CGPoint(x: origin.x + dx * arrowScale,
-                              y: origin.y + dy * arrowScale)
+                let arrowScale: CGFloat = min(size.width, size.height) * 3.0
+                let displayDx = dx * eyeDist
+                let displayDy = dy * eyeDist
+                let origin = toView(newCtr)
+                let tip = CGPoint(x: origin.x + displayDx * arrowScale,
+                                  y: origin.y + displayDy * arrowScale)
 
-            drawArrow(ctx: ctx, from: origin, to: tip,
-                      color: arrowColor, lineWidth: 2.5)
+                drawArrow(ctx: ctx, from: origin, to: tip,
+                          color: arrowColor, lineWidth: 2.5)
+            }
+        } else {
+            // Fallback: headTransform-based relative comparison
+            guard let oldFace = oldSnapshot.landmarks.first,
+                  oldFace.count >= 468 else { return }
+            guard let xform = Self.headTransform(oldFace: oldFace, newFace: newFace) else {
+                return
+            }
+            guard let newEyes = Self.eyeCenters(newFace) else { return }
+            let eyeDist = hypot(newEyes.right.x - newEyes.left.x,
+                                newEyes.right.y - newEyes.left.y)
+            guard eyeDist > 1e-6 else { return }
+
+            for (_, indices, _) in Self.featureGroups {
+                guard let oldCtr = Self.centroid(of: indices, in: oldFace),
+                      let newCtr = Self.centroid(of: indices, in: newFace) else { continue }
+
+                let expected = oldCtr.applying(xform)
+                let dx = newCtr.x - expected.x
+                let dy = newCtr.y - expected.y
+                guard hypot(dx, dy) / eyeDist > 0.02 else { continue }
+
+                let arrowScale: CGFloat = min(size.width, size.height) * 3.0
+                let origin = toView(newCtr)
+                let tip = CGPoint(x: origin.x + dx * arrowScale,
+                                  y: origin.y + dy * arrowScale)
+
+                drawArrow(ctx: ctx, from: origin, to: tip,
+                          color: arrowColor, lineWidth: 2.5)
+            }
         }
     }
 

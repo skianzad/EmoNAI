@@ -139,4 +139,4 @@ dmypy.json
 
 # FastVLM models
 app/FastVLM/model
-app/FastVLM/model_*
+models_store/
