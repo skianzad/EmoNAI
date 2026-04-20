@@ -12,8 +12,10 @@ import Video
 extension CVImageBuffer: @unchecked @retroactive Sendable {}
 extension CMSampleBuffer: @unchecked @retroactive Sendable {}
 
-// delay between frames -- controls the frame rate of the updates
-let FRAME_DELAY = Duration.milliseconds(1)
+// Cooldown between VLM inferences to prevent GPU thermal throttling.
+// Without this, continuous inference causes the M2 to throttle within
+// ~10 seconds, degrading prefill from ~700ms to 2000ms+.
+let FRAME_DELAY = Duration.milliseconds(500)
 
 struct ContentView: View {
     @State private var camera = CameraController()
@@ -110,7 +112,7 @@ struct ContentView: View {
                             if !enabled {
                                 displayFaceHistory.removeAll()
                                 emotionHistory.removeAll()
-                                model.maxTokens = 240
+                                model.maxTokens = 40
                             }
                             if enabled {
                                 prompt = "What emotion is this face showing?"
