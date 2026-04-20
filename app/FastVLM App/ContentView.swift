@@ -15,7 +15,7 @@ extension CMSampleBuffer: @unchecked @retroactive Sendable {}
 // Cooldown between VLM inferences to prevent GPU thermal throttling.
 // Without this, continuous inference causes the M2 to throttle within
 // ~10 seconds, degrading prefill from ~700ms to 2000ms+.
-let FRAME_DELAY = Duration.milliseconds(500)
+let FRAME_DELAY = Duration.milliseconds(1000)
 
 struct ContentView: View {
     @State private var camera = CameraController()
