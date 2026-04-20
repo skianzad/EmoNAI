@@ -106,7 +106,6 @@ class FastVLMModel {
 
                 let currentMaxTokens = self.maxTokens
                 let result = try await modelContainer.perform { context in
-                    // Measure the time it takes to prepare the input
                     
                     Task { @MainActor in
                         evaluationState = .processingPrompt
@@ -141,7 +140,6 @@ class FastVLMModel {
                             }
                         }
 
-                        // Show the text in the view as it generates
                         if tokens.count % displayEveryNTokens == 0 {
                             let text = context.tokenizer.decode(tokens: tokens)
                             Task { @MainActor in
@@ -156,7 +154,7 @@ class FastVLMModel {
                         }
                     }
                     
-                    // Return the duration of the LLM and the result
+                    MLX.GPU.clearCache()
                     return result
                 }
                 
