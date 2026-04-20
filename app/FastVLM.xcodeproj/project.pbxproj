@@ -82,6 +82,11 @@
 		};
 		C3ED54BB2D791BEA005E20B3 /* Exceptions for "FastVLM" folder in "FastVLM" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			foldersForBundleResources = (
+				model_0.5b,
+				model_1.5b,
+				model_7b,
+			);
 			publicHeaders = (
 				FastVLM.h,
 			);
