@@ -26,6 +26,14 @@ enum FastVLMModelSize: String, CaseIterable, Identifiable {
         }
     }
 
+    var visionModelName: String {
+        switch self {
+        case .small:  return "fastvithd_0_5b"
+        case .medium: return "fastvithd_1_5b"
+        case .large:  return "fastvithd_7b"
+        }
+    }
+
     var label: String { rawValue }
 }
 
@@ -74,6 +82,7 @@ class FastVLMModel {
         refreshAvailableModels()
         if let first = availableModelSizes.first {
             selectedModelSize = first
+            FastVLM.activeVisionModelName = first.visionModelName
         }
     }
 
@@ -89,6 +98,7 @@ class FastVLMModel {
         cancel()
         loadState = .idle
         selectedModelSize = size
+        FastVLM.activeVisionModelName = size.visionModelName
         modelInfo = "Switching to \(size.label)…"
         output = ""
         promptTime = ""

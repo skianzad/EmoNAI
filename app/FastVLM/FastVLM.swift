@@ -270,26 +270,38 @@ private enum Vision {
     fileprivate class VisionModelCoreML {
 
         let lock = NSLock()
-        var _model: fastvithd?
+        var _model: MLModel?
+        var _loadedName: String?
 
-        init() {
-        }
+        init() {}
 
-        func load() throws -> fastvithd {
-            try lock.withLock {
-                if let model = _model { return model }
-                let model = try fastvithd()
+        func load() throws -> MLModel {
+            let name = FastVLM.activeVisionModelName
+            return try lock.withLock {
+                if let model = _model, _loadedName == name { return model }
+                let bundle = Bundle(for: FastVLM.self)
+                guard let url = bundle.url(forResource: name, withExtension: "mlmodelc") else {
+                    fatalError("Compiled CoreML model '\(name).mlmodelc' not found in bundle")
+                }
+                let model = try MLModel(contentsOf: url)
                 _model = model
+                _loadedName = name
                 return model
             }
         }
 
-        public func model() -> fastvithd {
+        public func model() -> MLModel {
             try! load()
         }
 
+        func unload() {
+            lock.withLock {
+                _model = nil
+                _loadedName = nil
+            }
+        }
+
         public func encode(_ image: MLXArray) -> MLXArray {
-            // MLMultiArray requires mutable input data
             var (data, strides) = {
                 let arrayData = image.asType(.float32).asData(access: .noCopyIfContiguous)
                 return (arrayData.data, arrayData.strides)
@@ -310,16 +322,17 @@ private enum Vision {
                     + "the CIImage origin to (0, 0) before scaling.")
 
             return data.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
-                // wrap the backing of the MLXArray
                 let array = try! MLMultiArray(
                     dataPointer: ptr.baseAddress!, shape: [1, 3, h, w], dataType: .float32,
                     strides: strides.map { .init(value: $0) })
 
-                // inference
-                let output = try! model().prediction(images: array)
-                precondition(output.image_features.shape == [1, 256, 3072])
-                precondition(output.image_features.dataType == .float32)
-                return output.image_features.withUnsafeBytes { ptr in
+                let input = try! MLDictionaryFeatureProvider(
+                    dictionary: ["images": MLFeatureValue(multiArray: array)])
+                let output = try! model().prediction(from: input)
+                let features = output.featureValue(for: "image_features")!.multiArrayValue!
+                precondition(features.shape == [1, 256, 3072])
+                precondition(features.dataType == .float32)
+                return features.withUnsafeBytes { ptr in
                     MLXArray(ptr, [1, 256, 3072], type: Float32.self)
                 }
             }
@@ -480,6 +493,10 @@ private class FastVLMMultiModalProjector: Module, UnaryLayer {
 ///
 /// This is typically created by ``VLMModelFactory``.
 public class FastVLM: Module, VLMModel, KVCacheDimensionProvider {
+
+    /// Name of the compiled CoreML vision encoder to load (without .mlmodelc).
+    /// Set this before loading a model to pick the right vision encoder.
+    nonisolated(unsafe) static public var activeVisionModelName: String = "fastvithd_0_5b"
 
     static public var modelConfiguration: ModelConfiguration {
         return modelConfiguration(directory: "model_0.5b")
