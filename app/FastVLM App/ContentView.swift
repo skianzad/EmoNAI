@@ -556,6 +556,7 @@ struct ContentView: View {
     func analyzeVideoFrames(_ frames: AsyncStream<CVImageBuffer>) async {
         var vlmLandmarkHistory: [FaceLandmarkDisplayResult] = []
         var lastVLMSnapshotDate = Date.distantPast
+        let debugCICtx = CIContext()
 
         for await frame in frames {
             let imageForVLM: CIImage
@@ -613,8 +614,7 @@ struct ContentView: View {
                 imageForVLM = rendered
                 print("[VLM DEBUG] rendered mode=\(overlayMode), \(vlmLandmarkHistory.count) ghosts, extent: \(rendered.extent)")
                 debugSaveImage(rendered, tag: "vlm_input")
-                let ciCtx = CIContext()
-                if let cg = ciCtx.createCGImage(rendered, from: rendered.extent) {
+                if let cg = debugCICtx.createCGImage(rendered, from: rendered.extent) {
                     await MainActor.run { lastVLMInputImage = cg }
                 }
             } else {
@@ -909,9 +909,15 @@ struct ContentView: View {
 // MARK: - Debug helpers
 
 /// Saves a CIImage to Desktop (macOS) or Documents (iOS) for inspection.
+private let sharedDebugCIContext = CIContext()
+private var lastDebugSaveDate = Date.distantPast
+
 private func debugSaveImage(_ ciImage: CIImage, tag: String) {
-    let ctx = CIContext()
-    guard let cgImage = ctx.createCGImage(ciImage, from: ciImage.extent) else {
+    let now = Date()
+    guard now.timeIntervalSince(lastDebugSaveDate) >= 5.0 else { return }
+    lastDebugSaveDate = now
+
+    guard let cgImage = sharedDebugCIContext.createCGImage(ciImage, from: ciImage.extent) else {
         print("[VLM DEBUG] failed to create CGImage")
         return
     }

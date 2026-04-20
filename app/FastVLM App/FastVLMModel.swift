@@ -119,46 +119,47 @@ class FastVLMModel {
 
                     var seenFirstToken = false
 
-                    let text: String
-                    do {
-                        let result = try MLXLMCommon.generate(
-                            input: input, parameters: generateParameters, context: context
-                        ) { tokens in
-                            if Task.isCancelled {
-                                return .stop
-                            }
+                    let result = try MLXLMCommon.generate(
+                        input: input, parameters: generateParameters, context: context
+                    ) { tokens in
+                        if Task.isCancelled {
+                            return .stop
+                        }
 
-                            if !seenFirstToken {
-                                seenFirstToken = true
+                        if !seenFirstToken {
+                            seenFirstToken = true
 
-                                let llmDuration = Date().timeIntervalSince(llmStart)
-                                let prefillMs = Int(llmDuration * 1000) - prepMs
-                                let tokenText = context.tokenizer.decode(tokens: tokens)
-                                print("[PERF] LLM prefill: \(prefillMs) ms, total TTFT: \(Int(llmDuration * 1000)) ms")
-                                Task { @MainActor in
-                                    evaluationState = .generatingResponse
-                                    self.output = tokenText
-                                    self.promptTime = "\(prepMs)+\(prefillMs) ms"
-                                }
-                            }
-
-                            if tokens.count % displayEveryNTokens == 0 {
-                                let tokenText = context.tokenizer.decode(tokens: tokens)
-                                Task { @MainActor in
-                                    self.output = tokenText
-                                }
-                            }
-
-                            if tokens.count >= currentMaxTokens {
-                                return .stop
-                            } else {
-                                return .more
+                            let llmDuration = Date().timeIntervalSince(llmStart)
+                            let prefillMs = Int(llmDuration * 1000) - prepMs
+                            let tokenText = context.tokenizer.decode(tokens: tokens)
+                            print("[PERF] LLM prefill: \(prefillMs) ms, total TTFT: \(Int(llmDuration * 1000)) ms")
+                            Task { @MainActor in
+                                evaluationState = .generatingResponse
+                                self.output = tokenText
+                                self.promptTime = "\(prepMs)+\(prefillMs) ms"
                             }
                         }
-                        text = result.output
+
+                        if tokens.count % displayEveryNTokens == 0 {
+                            let tokenText = context.tokenizer.decode(tokens: tokens)
+                            Task { @MainActor in
+                                self.output = tokenText
+                            }
+                        }
+
+                        if tokens.count >= currentMaxTokens {
+                            return .stop
+                        } else {
+                            return .more
+                        }
                     }
-                    // result (with its MLXArray refs) is now out of scope
+                    let text = result.output
+
+                    // Aggressively free GPU memory between generations
+                    MLX.GPU.set(cacheLimit: 0)
                     MLX.GPU.clearCache()
+                    MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+
                     return text
                 }
 
