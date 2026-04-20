@@ -105,8 +105,8 @@ class FastVLMModel {
                 if Task.isCancelled { return }
 
                 let currentMaxTokens = self.maxTokens
-                let result = try await modelContainer.perform { context in
-                    
+                let outputText: String = try await modelContainer.perform { context in
+
                     Task { @MainActor in
                         evaluationState = .processingPrompt
                     }
@@ -119,48 +119,51 @@ class FastVLMModel {
 
                     var seenFirstToken = false
 
-                    let result = try MLXLMCommon.generate(
-                        input: input, parameters: generateParameters, context: context
-                    ) { tokens in
-                        if Task.isCancelled {
-                            return .stop
-                        }
+                    let text: String
+                    do {
+                        let result = try MLXLMCommon.generate(
+                            input: input, parameters: generateParameters, context: context
+                        ) { tokens in
+                            if Task.isCancelled {
+                                return .stop
+                            }
 
-                        if !seenFirstToken {
-                            seenFirstToken = true
-                            
-                            let llmDuration = Date().timeIntervalSince(llmStart)
-                            let prefillMs = Int(llmDuration * 1000) - prepMs
-                            let text = context.tokenizer.decode(tokens: tokens)
-                            print("[PERF] LLM prefill: \(prefillMs) ms, total TTFT: \(Int(llmDuration * 1000)) ms")
-                            Task { @MainActor in
-                                evaluationState = .generatingResponse
-                                self.output = text
-                                self.promptTime = "\(prepMs)+\(prefillMs) ms"
+                            if !seenFirstToken {
+                                seenFirstToken = true
+
+                                let llmDuration = Date().timeIntervalSince(llmStart)
+                                let prefillMs = Int(llmDuration * 1000) - prepMs
+                                let tokenText = context.tokenizer.decode(tokens: tokens)
+                                print("[PERF] LLM prefill: \(prefillMs) ms, total TTFT: \(Int(llmDuration * 1000)) ms")
+                                Task { @MainActor in
+                                    evaluationState = .generatingResponse
+                                    self.output = tokenText
+                                    self.promptTime = "\(prepMs)+\(prefillMs) ms"
+                                }
+                            }
+
+                            if tokens.count % displayEveryNTokens == 0 {
+                                let tokenText = context.tokenizer.decode(tokens: tokens)
+                                Task { @MainActor in
+                                    self.output = tokenText
+                                }
+                            }
+
+                            if tokens.count >= currentMaxTokens {
+                                return .stop
+                            } else {
+                                return .more
                             }
                         }
-
-                        if tokens.count % displayEveryNTokens == 0 {
-                            let text = context.tokenizer.decode(tokens: tokens)
-                            Task { @MainActor in
-                                self.output = text
-                            }
-                        }
-
-                        if tokens.count >= currentMaxTokens {
-                            return .stop
-                        } else {
-                            return .more
-                        }
+                        text = result.output
                     }
-                    
+                    // result (with its MLXArray refs) is now out of scope
                     MLX.GPU.clearCache()
-                    return result
+                    return text
                 }
-                
-                // Check if task was cancelled before updating UI
+
                 if !Task.isCancelled {
-                    self.output = result.output
+                    self.output = outputText
                 }
 
             } catch {
