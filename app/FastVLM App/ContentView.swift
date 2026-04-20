@@ -102,25 +102,6 @@ struct ContentView: View {
                             model.cancel()
                         }
 
-                        if model.availableModelSizes.count > 1 {
-                            HStack {
-                                Text("Model")
-                                    .font(.subheadline)
-                                Picker("Model", selection: Binding(
-                                    get: { model.selectedModelSize },
-                                    set: { newSize in
-                                        Task { await model.switchModel(to: newSize) }
-                                    }
-                                )) {
-                                    ForEach(model.availableModelSizes) { size in
-                                        Text(size.label).tag(size)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .labelsHidden()
-                            }
-                        }
-
                         Toggle(isOn: $faceLandmarkModeEnabled) {
                             Label("Face Landmark Mode", systemImage: "face.dashed")
                                 .font(.subheadline)

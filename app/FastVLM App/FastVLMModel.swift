@@ -11,32 +11,6 @@ import MLXLMCommon
 import MLXRandom
 import MLXVLM
 
-enum FastVLMModelSize: String, CaseIterable, Identifiable {
-    case small = "0.5B"
-    case medium = "1.5B"
-    case large = "7B"
-
-    var id: String { rawValue }
-
-    var directoryName: String {
-        switch self {
-        case .small:  return "model_0.5b"
-        case .medium: return "model_1.5b"
-        case .large:  return "model_7b"
-        }
-    }
-
-    var visionModelName: String {
-        switch self {
-        case .small:  return "fastvithd_0_5b"
-        case .medium: return "fastvithd_1_5b"
-        case .large:  return "fastvithd_7b"
-        }
-    }
-
-    var label: String { rawValue }
-}
-
 @Observable
 @MainActor
 class FastVLMModel {
@@ -51,6 +25,8 @@ class FastVLMModel {
         case loaded(ModelContainer)
     }
 
+    private let modelConfiguration = FastVLM.modelConfiguration
+
     /// parameters controlling the output
     let generateParameters = GenerateParameters(temperature: 0.0)
     var maxTokens = 240
@@ -63,12 +39,6 @@ class FastVLMModel {
     private var loadState = LoadState.idle
     private var currentTask: Task<Void, Never>?
 
-    /// The currently selected model size.
-    public var selectedModelSize: FastVLMModelSize = .small
-
-    /// Model sizes that are actually present in the app bundle.
-    public private(set) var availableModelSizes: [FastVLMModelSize] = []
-
     enum EvaluationState: String, CaseIterable {
         case idle = "Idle"
         case processingPrompt = "Processing Prompt"
@@ -79,48 +49,24 @@ class FastVLMModel {
 
     public init() {
         FastVLM.register(modelFactory: VLMModelFactory.shared)
-        refreshAvailableModels()
-        if let first = availableModelSizes.first {
-            selectedModelSize = first
-            FastVLM.activeVisionModelName = first.visionModelName
-        }
-    }
-
-    public func refreshAvailableModels() {
-        let dirs = FastVLM.availableModelDirectories()
-        availableModelSizes = FastVLMModelSize.allCases.filter { size in
-            dirs.contains(size.directoryName)
-        }
-    }
-
-    /// Unloads the current model and loads the given size.
-    public func switchModel(to size: FastVLMModelSize) async {
-        cancel()
-        loadState = .idle
-        selectedModelSize = size
-        FastVLM.activeVisionModelName = size.visionModelName
-        modelInfo = "Switching to \(size.label)…"
-        output = ""
-        promptTime = ""
-        MLX.GPU.clearCache()
-        await load()
     }
 
     private func _load() async throws -> ModelContainer {
         switch loadState {
         case .idle:
+            // limit the buffer cache
             MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
 
-            let config = FastVLM.modelConfiguration(directory: selectedModelSize.directoryName)
             let modelContainer = try await VLMModelFactory.shared.loadContainer(
-                configuration: config
-            ) { [config] progress in
+                configuration: modelConfiguration
+            ) {
+                [modelConfiguration] progress in
                 Task { @MainActor in
                     self.modelInfo =
-                        "Loading \(config.name): \(Int(progress.fractionCompleted * 100))%"
+                        "Downloading \(modelConfiguration.name): \(Int(progress.fractionCompleted * 100))%"
                 }
             }
-            self.modelInfo = "Loaded \(selectedModelSize.label)"
+            self.modelInfo = "Loaded"
             loadState = .loaded(modelContainer)
             return modelContainer
 
@@ -144,18 +90,24 @@ class FastVLMModel {
 
         running = true
         
+        // Cancel any existing task
         currentTask?.cancel()
 
+        // Create new task and store reference
         let task = Task {
             do {
                 let modelContainer = try await _load()
 
+                // each time you generate you will get something new
                 MLXRandom.seed(UInt64(Date.timeIntervalSinceReferenceDate * 1000))
                 
+                // Check if task was cancelled
                 if Task.isCancelled { return }
 
                 let currentMaxTokens = self.maxTokens
                 let result = try await modelContainer.perform { context in
+                    // Measure the time it takes to prepare the input
+                    
                     Task { @MainActor in
                         evaluationState = .processingPrompt
                     }
@@ -165,15 +117,20 @@ class FastVLMModel {
                     
                     var seenFirstToken = false
 
+                    // FastVLM generates the output
                     let result = try MLXLMCommon.generate(
                         input: input, parameters: generateParameters, context: context
                     ) { tokens in
+                        // Check if task was cancelled
                         if Task.isCancelled {
                             return .stop
                         }
 
                         if !seenFirstToken {
                             seenFirstToken = true
+                            
+                            // produced first token, update the time to first token,
+                            // the processing state and start displaying the text
                             let llmDuration = Date().timeIntervalSince(llmStart)
                             let text = context.tokenizer.decode(tokens: tokens)
                             Task { @MainActor in
@@ -183,6 +140,7 @@ class FastVLMModel {
                             }
                         }
 
+                        // Show the text in the view as it generates
                         if tokens.count % displayEveryNTokens == 0 {
                             let text = context.tokenizer.decode(tokens: tokens)
                             Task { @MainActor in
@@ -197,9 +155,11 @@ class FastVLMModel {
                         }
                     }
                     
+                    // Return the duration of the LLM and the result
                     return result
                 }
                 
+                // Check if task was cancelled before updating UI
                 if !Task.isCancelled {
                     self.output = result.output
                 }
