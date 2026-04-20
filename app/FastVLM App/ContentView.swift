@@ -653,7 +653,8 @@ struct ContentView: View {
                 let aofPrompt = await MainActor.run { arrowsOnFacePrompt }
                 let aofSuffix = await MainActor.run { arrowsOnFaceSuffix }
                 var basePrompt: String
-                let movementRef = baseline ?? vlmLandmarkHistory.first
+                let vlmBaseline = await MainActor.run { neutralFaceBaseline }
+                let movementRef = vlmBaseline ?? vlmLandmarkHistory.first
                 if overlayMode2 == .arrowsOnFace, let movementRef, !vlmLandmarkHistory.isEmpty {
                     let movement = FaceMovementArrowsOverlay.describeMovements(
                         old: movementRef,
