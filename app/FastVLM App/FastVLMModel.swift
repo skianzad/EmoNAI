@@ -114,14 +114,15 @@ class FastVLMModel {
 
                     let llmStart = Date()
                     let input = try await context.processor.prepare(input: userInput)
-                    
+                    let prepareEnd = Date()
+                    let prepMs = Int(prepareEnd.timeIntervalSince(llmStart) * 1000)
+                    print("[PERF] prepare (vision+preprocess): \(prepMs) ms")
+
                     var seenFirstToken = false
 
-                    // FastVLM generates the output
                     let result = try MLXLMCommon.generate(
                         input: input, parameters: generateParameters, context: context
                     ) { tokens in
-                        // Check if task was cancelled
                         if Task.isCancelled {
                             return .stop
                         }
@@ -129,14 +130,14 @@ class FastVLMModel {
                         if !seenFirstToken {
                             seenFirstToken = true
                             
-                            // produced first token, update the time to first token,
-                            // the processing state and start displaying the text
                             let llmDuration = Date().timeIntervalSince(llmStart)
+                            let prefillMs = Int(llmDuration * 1000) - prepMs
                             let text = context.tokenizer.decode(tokens: tokens)
+                            print("[PERF] LLM prefill: \(prefillMs) ms, total TTFT: \(Int(llmDuration * 1000)) ms")
                             Task { @MainActor in
                                 evaluationState = .generatingResponse
                                 self.output = text
-                                self.promptTime = "\(Int(llmDuration * 1000)) ms"
+                                self.promptTime = "\(prepMs)+\(prefillMs) ms"
                             }
                         }
 
