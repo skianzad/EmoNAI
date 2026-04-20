@@ -482,11 +482,37 @@ private class FastVLMMultiModalProjector: Module, UnaryLayer {
 public class FastVLM: Module, VLMModel, KVCacheDimensionProvider {
 
     static public var modelConfiguration: ModelConfiguration {
+        return modelConfiguration(directory: "model_0.5b")
+    }
+
+    /// Returns a ModelConfiguration for the given subdirectory within the
+    /// FastVLM bundle (e.g. "model_0.5b", "model_1.5b", "model_7b").
+    static public func modelConfiguration(directory: String) -> ModelConfiguration {
         let bundle = Bundle(for: FastVLM.self)
-        let url = bundle.url(forResource: "config", withExtension: "json")!
-            .resolvingSymlinksInPath()
-            .deletingLastPathComponent()
+        guard let url = bundle.url(
+            forResource: "config", withExtension: "json",
+            subdirectory: directory
+        )?.resolvingSymlinksInPath().deletingLastPathComponent() else {
+            fatalError("Model directory '\(directory)' not found in bundle")
+        }
         return ModelConfiguration(directory: url)
+    }
+
+    /// Discovers all model directories available in the bundle by looking for
+    /// subdirectories named `model_*` that contain a `config.json`.
+    static public func availableModelDirectories() -> [String] {
+        let bundle = Bundle(for: FastVLM.self)
+        guard let resourceURL = bundle.resourceURL else { return [] }
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: resourceURL, includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return [] }
+        return contents.compactMap { url in
+            guard url.lastPathComponent.hasPrefix("model_") else { return nil }
+            let configURL = url.appendingPathComponent("config.json")
+            guard fm.fileExists(atPath: configURL.path) else { return nil }
+            return url.lastPathComponent
+        }.sorted()
     }
 
     static public func register(modelFactory: VLMModelFactory) {

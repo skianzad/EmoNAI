@@ -24,8 +24,8 @@ struct ContentView: View {
 
     @State private var prompt = "Describe the image in English."
     @State private var promptSuffix = "Output should be brief, about 15 words or less."
-    @State private var arrowsOnFacePrompt = "Arousal(-10calm,10excited)? Valence(-10neg,10pos)?"
-    @State private var arrowsOnFaceSuffix = "Answer ONLY two numbers separated by comma. Example: 3,-5"
+    @State private var arrowsOnFacePrompt = "Emotion?"
+    @State private var arrowsOnFaceSuffix = "Reply with ONLY the emotion word."
 
     @State private var isShowingInfo: Bool = false
 
@@ -102,6 +102,25 @@ struct ContentView: View {
                             model.cancel()
                         }
 
+                        if model.availableModelSizes.count > 1 {
+                            HStack {
+                                Text("Model")
+                                    .font(.subheadline)
+                                Picker("Model", selection: Binding(
+                                    get: { model.selectedModelSize },
+                                    set: { newSize in
+                                        Task { await model.switchModel(to: newSize) }
+                                    }
+                                )) {
+                                    ForEach(model.availableModelSizes) { size in
+                                        Text(size.label).tag(size)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                            }
+                        }
+
                         Toggle(isOn: $faceLandmarkModeEnabled) {
                             Label("Face Landmark Mode", systemImage: "face.dashed")
                                 .font(.subheadline)
@@ -115,7 +134,7 @@ struct ContentView: View {
                             if enabled {
                                 prompt = "What emotion is this face showing?"
                                 promptSuffix = "One word: happy, sad, angry, surprised, fearful, disgusted, or neutral. Under 15 words."
-                                model.maxTokens = 8
+                                model.maxTokens = 50
                             }
                         }
 
@@ -881,11 +900,6 @@ struct ContentView: View {
 
     /// Extracts a short emotion label from a VLM response.
     /// Always tries to find a known emotion keyword first and returns just that word.
-    private static let arousalValenceKeywords: Set<String> = [
-        "arousal", "valence", "low", "medium", "high",
-        "negative", "neutral", "positive"
-    ]
-
     static func extractEmotion(from raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
@@ -895,24 +909,7 @@ struct ContentView: View {
             if lower.hasPrefix(prefix) { return "" }
         }
 
-        // Check for numeric arousal/valence like "3, -5" or "3,-5"
-        let numPattern = lower
-            .replacingOccurrences(of: " ", with: "")
-        let numParts = numPattern.split(separator: ",")
-        if numParts.count == 2,
-           let a = Int(numParts[0]), let v = Int(numParts[1]),
-           (-10...10).contains(a), (-10...10).contains(v) {
-            return "A:\(a) V:\(v)"
-        }
-
-        // Check for arousal/valence keywords
-        if lower.contains("arousal") || lower.contains("valence") {
-            let words = lower.split(separator: " ")
-                .map { String($0).trimmingCharacters(in: .punctuationCharacters) }
-                .filter { arousalValenceKeywords.contains($0) }
-            if words.count >= 2 { return words.joined(separator: " ") }
-        }
-
+        // Always scan for a known emotion keyword and return just that word
         for w in lower.split(separator: " ") {
             let clean = String(w).trimmingCharacters(in: .punctuationCharacters)
             if knownEmotions.contains(clean) {
@@ -920,8 +917,9 @@ struct ContentView: View {
             }
         }
 
+        // If the response is a single short word, keep it
         let allWords = trimmed.split(separator: " ")
-        if allWords.count <= 4 { return trimmed.lowercased() }
+        if allWords.count == 1 { return trimmed }
 
         return ""
     }
