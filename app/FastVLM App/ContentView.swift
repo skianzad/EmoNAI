@@ -59,6 +59,10 @@ struct ContentView: View {
     }
     @State private var faceOverlayMode: FaceOverlayMode = .ghosts
 
+    /// Captured neutral/resting face landmarks used as absolute reference
+    /// for movement arrows and VLM movement descriptions.
+    @State private var neutralFaceBaseline: FaceLandmarkDisplayResult? = nil
+
     /// Last image sent to the VLM, shown as a debug thumbnail.
     @State private var lastVLMInputImage: CGImage? = nil
     @State private var showVLMDebugThumbnail: Bool = false
@@ -112,6 +116,7 @@ struct ContentView: View {
                             if !enabled {
                                 displayFaceHistory.removeAll()
                                 emotionHistory.removeAll()
+                                neutralFaceBaseline = nil
                                 model.maxTokens = 40
                             }
                             if enabled {
@@ -147,6 +152,16 @@ struct ContentView: View {
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 140)
+
+                                Button {
+                                    if let latest = displayFaceHistory.last {
+                                        neutralFaceBaseline = latest
+                                    }
+                                } label: {
+                                    Image(systemName: neutralFaceBaseline != nil
+                                          ? "face.smiling.inverse" : "face.smiling")
+                                        .foregroundStyle(neutralFaceBaseline != nil ? .green : .gray)
+                                }
 
                                 Button {
                                     showVLMDebugThumbnail.toggle()
@@ -211,10 +226,15 @@ struct ContentView: View {
                                 .overlay {
                                     if faceLandmarkModeEnabled,
                                        faceOverlayMode != .ghosts,
-                                       displayFaceHistory.count >= 2 {
-                                        FaceMovementArrowsOverlay(
-                                            oldSnapshot: displayFaceHistory.first!,
-                                            newSnapshot: displayFaceHistory.last!)
+                                       !displayFaceHistory.isEmpty {
+                                        let reference = neutralFaceBaseline
+                                            ?? (displayFaceHistory.count >= 2
+                                                ? displayFaceHistory.first! : nil)
+                                        if let reference {
+                                            FaceMovementArrowsOverlay(
+                                                oldSnapshot: reference,
+                                                newSnapshot: displayFaceHistory.last!)
+                                        }
                                     }
                                 }
                                 .overlay(alignment: .bottomTrailing) {
@@ -587,10 +607,12 @@ struct ContentView: View {
                 }
 
                 let overlayMode = await MainActor.run { faceOverlayMode }
+                let baseline = await MainActor.run { neutralFaceBaseline }
                 let arrowsOn = overlayMode == .arrows || overlayMode == .arrowsOnFace
-                if arrowsOn && vlmLandmarkHistory.count >= 2 {
+                let arrowRef = baseline ?? vlmLandmarkHistory.first
+                if arrowsOn, let arrowRef, !vlmLandmarkHistory.isEmpty {
                     let hasMovement = FaceMovementArrowsOverlay.hasMeaningfulMovement(
-                        old: vlmLandmarkHistory.first!,
+                        old: arrowRef,
                         new: vlmLandmarkHistory.last!)
                     if !hasMovement {
                         print("[VLM DEBUG] no meaningful movement — skipping VLM")
@@ -631,9 +653,10 @@ struct ContentView: View {
                 let aofPrompt = await MainActor.run { arrowsOnFacePrompt }
                 let aofSuffix = await MainActor.run { arrowsOnFaceSuffix }
                 var basePrompt: String
-                if overlayMode2 == .arrowsOnFace, vlmLandmarkHistory.count >= 2 {
+                let movementRef = baseline ?? vlmLandmarkHistory.first
+                if overlayMode2 == .arrowsOnFace, let movementRef, !vlmLandmarkHistory.isEmpty {
                     let movement = FaceMovementArrowsOverlay.describeMovements(
-                        old: vlmLandmarkHistory.first!,
+                        old: movementRef,
                         new: vlmLandmarkHistory.last!)
                     basePrompt = "Detected muscle movement: \(movement). \(aofPrompt)"
                 } else {
@@ -827,9 +850,10 @@ struct ContentView: View {
         let fullPrompt: String
         let singleBasePrompt: String
         let isAOF = isFaceMode && currentOverlayMode == .arrowsOnFace
-        if isAOF && displayFaceHistory.count >= 2 {
+        let singleRef = neutralFaceBaseline ?? displayFaceHistory.first
+        if isAOF, let singleRef, !displayFaceHistory.isEmpty {
             let movement = FaceMovementArrowsOverlay.describeMovements(
-                old: displayFaceHistory.first!,
+                old: singleRef,
                 new: displayFaceHistory.last!)
             singleBasePrompt = "Detected muscle movement: \(movement). \(arrowsOnFacePrompt)"
         } else {
