@@ -1,0 +1,2 @@
+Object move
+Drop source.jpg here: a scene with a handbag on a chair and a table nearby.

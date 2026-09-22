@@ -1,0 +1,4 @@
+Input modality — edge-detection file
+Drop:
+  source.jpg   original photo that includes a vase
+  edge.png     edge map with the target outline marked (this file is also used as markup)

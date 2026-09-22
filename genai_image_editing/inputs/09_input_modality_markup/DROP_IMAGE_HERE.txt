@@ -1,0 +1,5 @@
+Input modality — hand-drawn markup
+Drop:
+  source.jpg   original photo that includes a lamp
+  markup.png   same photo with the lamp circled and an arrow to the destination
+  edges.png    optional edge map of the scene

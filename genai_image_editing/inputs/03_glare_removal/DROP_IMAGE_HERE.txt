@@ -1,0 +1,2 @@
+Glare removal
+Drop source.jpg here: a person wearing glasses with visible glare on the lenses.

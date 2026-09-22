@@ -1,0 +1,7 @@
+vendor/
+checkpoints/
+output/
+*.pth
+*.pth.tar
+__pycache__/
+.venv/

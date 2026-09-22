@@ -1,0 +1,9 @@
+torch>=2.1
+torchvision
+coremltools>=7.0
+gdown
+Pillow
+numpy
+facenet-pytorch
+timm
+thop

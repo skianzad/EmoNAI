@@ -1,0 +1,3 @@
+Armchair rearrangement
+Drop source.jpg here: a room with armchairs, a window, and a sofa.
+Swap so the armchairs sit beside the window and face the sofa.

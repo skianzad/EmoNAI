@@ -62,7 +62,7 @@ struct ContentView: View {
     enum FaceOverlayMode: Int, CaseIterable {
         case ghosts = 0      // ghost trail of past landmark snapshots
         case arrows = 1      // current landmarks + movement arrows
-        case arrowsOnFace = 2 // faded camera frame + movement arrows (sent to VLM)
+        case arrowsOnFace = 2 // dimmed camera + full mesh + movement arrows (VLM input)
     }
     @State private var faceOverlayMode: FaceOverlayMode = .ghosts
 
@@ -215,7 +215,13 @@ struct ContentView: View {
                                                         ? displayFaceHistory.first!.landmarks.first
                                                         : nil)
                                             case .arrowsOnFace:
-                                                EmptyView()
+                                                // Full 468+iris mesh and feature polylines (brows, lip outline incl.
+                                                // corners, etc.); movement arrows are drawn in a second overlay.
+                                                FaceLandmarkOverlay(
+                                                    history: [displayFaceHistory.last!],
+                                                    referenceFace: displayFaceHistory.count >= 2
+                                                        ? displayFaceHistory.first!.landmarks.first
+                                                        : nil)
                                             }
                                         }
                                     }

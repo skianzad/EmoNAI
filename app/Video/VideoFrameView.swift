@@ -77,14 +77,56 @@ public struct VideoFrameView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 10.0))
+        .overlay(alignment: .bottom) {
+            if cameraType == .continuous {
+                VStack(spacing: 8) {
+                    if hold {
+                        Text("Stream paused (Space to resume)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.black.opacity(0.55))
+                            }
+                    }
+                    Button {
+                        keySpaceTapped()
+                    } label: {
+                        Label(
+                            hold ? "Resume stream" : "Pause stream",
+                            systemImage: hold ? "play.fill" : "pause.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(hold ? .gray : .accentColor)
+                }
+                .padding(.bottom, 8)
+            }
+        }
+        .focusable()
+        #if !os(macOS)
+        .onKeyPress(.space) {
+            keySpaceTapped()
+            return .handled
+        }
+        #endif
+        #if os(macOS)
+        .background {
+            // Space works even when a List/field has first responder, except in text input.
+            SpaceBarKeyMonitorMac(isEnabled: true, onSpace: { keySpaceTapped() })
+        }
+        #endif
         .task {
-            // feed frames to the _ImageView
+            // feed frames to the _ImageView; read `hold` on the main actor so pause always applies
             if Task.isCancelled {
                 return
             }
             for await frame in frames {
-                if !hold {
-                    videoFrame = frame
+                let doUpdate = await MainActor.run { !hold }
+                if doUpdate {
+                    await MainActor.run { videoFrame = frame }
                 }
             }
         }
@@ -106,6 +148,17 @@ public struct VideoFrameView: View {
             if let action {
                 action(videoFrame)
             }
+        }
+    }
+
+    /// Space: single mode matches Capture / Resume. Continuous mode only pauses or resumes
+    /// the preview (no single-frame VLM `action` on pause).
+    private func keySpaceTapped() {
+        switch cameraType {
+        case .single:
+            tap()
+        case .continuous:
+            hold.toggle()
         }
     }
 }
