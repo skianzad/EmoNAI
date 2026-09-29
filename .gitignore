@@ -140,3 +140,7 @@ dmypy.json
 # FastVLM models
 app/FastVLM/model
 models_store/
+
+# Keep the Next.js app library (root lib/ is still ignored)
+!webapp_genai/lib/
+!webapp_genai/lib/**
