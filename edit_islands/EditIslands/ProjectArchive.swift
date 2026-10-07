@@ -28,6 +28,7 @@ enum ProjectArchive {
         var selectedIslandIDs: Set<UUID>
         var ssimThreshold: Double
         var minIslandArea: Int
+        var islandAreaFilter: Int
     }
 
     static func encode(_ snapshot: Snapshot) throws -> Data {
@@ -75,7 +76,8 @@ enum ProjectArchive {
             selectedLayerID: snapshot.selectedLayerID,
             selectedIslandIDs: Array(snapshot.selectedIslandIDs),
             ssimThreshold: snapshot.ssimThreshold,
-            minIslandArea: snapshot.minIslandArea
+            minIslandArea: snapshot.minIslandArea,
+            islandAreaFilter: snapshot.islandAreaFilter
         )
         let json = try JSONEncoder().encode(manifest)
 
@@ -170,7 +172,8 @@ enum ProjectArchive {
             selectedLayerID: manifest.selectedLayerID,
             selectedIslandIDs: Set(manifest.selectedIslandIDs),
             ssimThreshold: manifest.ssimThreshold,
-            minIslandArea: manifest.minIslandArea
+            minIslandArea: manifest.minIslandArea,
+            islandAreaFilter: manifest.islandAreaFilter ?? 0
         )
     }
 
@@ -197,6 +200,7 @@ enum ProjectArchive {
         var selectedIslandIDs: [UUID]
         var ssimThreshold: Double
         var minIslandArea: Int
+        var islandAreaFilter: Int?
     }
 
     private struct ImageRecord: Codable {

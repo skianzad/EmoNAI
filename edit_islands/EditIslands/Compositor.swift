@@ -4,7 +4,8 @@ enum Compositor {
     /// Final = original, then for each visible layer paint enabled-island pixels from that layer's edit.
     static func composite(
         original: ImageBuffer,
-        layers: [EditLayer]
+        layers: [EditLayer],
+        minArea: Int = 0
     ) -> ImageBuffer {
         var out = original.rgba
         let w = original.width
@@ -18,12 +19,25 @@ enum Compositor {
             precondition(layer.width == w && layer.height == h)
             precondition(layer.editedPixels.count == out.count)
             let edited = layer.editedPixels
-            for i in 0..<n where layer.combinedMask[i] != 0 {
-                let o = i * 4
-                out[o] = edited[o]
-                out[o + 1] = edited[o + 1]
-                out[o + 2] = edited[o + 2]
-                out[o + 3] = 255
+            if minArea <= 0 {
+                for i in 0..<n where layer.combinedMask[i] != 0 {
+                    let o = i * 4
+                    out[o] = edited[o]
+                    out[o + 1] = edited[o + 1]
+                    out[o + 2] = edited[o + 2]
+                    out[o + 3] = 255
+                }
+            } else {
+                for island in layer.islands where island.isEnabled && island.area >= minArea {
+                    let mask = island.mask
+                    for i in 0..<n where mask[i] != 0 {
+                        let o = i * 4
+                        out[o] = edited[o]
+                        out[o + 1] = edited[o + 1]
+                        out[o + 2] = edited[o + 2]
+                        out[o + 3] = 255
+                    }
+                }
             }
         }
         return ImageBuffer(width: w, height: h, rgba: out)
@@ -35,6 +49,7 @@ enum Compositor {
         layers: [EditLayer],
         selectedIslandIDs: Set<UUID>,
         maxIslandsPerLayer: Int = 8,
+        minArea: Int = 0,
         overlayAlpha: UInt8 = 90
     ) -> ImageBuffer {
         let w = size.width
@@ -47,7 +62,7 @@ enum Compositor {
 
         for layer in layers where layer.isVisible {
             let ranked = layer.islands
-                .filter(\.isEnabled)
+                .filter { $0.isEnabled && $0.area >= minArea }
                 .sorted { $0.area > $1.area }
             var drawSet = Array(ranked.prefix(maxIslandsPerLayer))
             for island in layer.islands where selectedIslandIDs.contains(island.id) && island.isEnabled {

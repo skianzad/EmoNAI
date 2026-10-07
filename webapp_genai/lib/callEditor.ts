@@ -1,5 +1,7 @@
+import { fitImage, readDataUrl } from "./shrink";
+
 export async function callEditor(editor: string, prompt: string, source: string, mask?: string) {
-  const { mime, image } = await encodeImage(source);
+  const { mime, image } = await encodeImage(source, true);
   const region = mask ? await encodeImage(editor === "gpt_image_2" ? await openAIMask(mask) : mask) : null;
   const response = await fetch("/api/edit", {
     method: "POST",
@@ -18,18 +20,14 @@ export async function callEditor(editor: string, prompt: string, source: string,
   return body.image as string;
 }
 
-async function encodeImage(source: string) {
-  if (source.startsWith("data:")) {
+async function encodeImage(source: string, fit = false) {
+  if (source.startsWith("data:") && !fit) {
     const [head, image] = source.split(",");
     return { mime: head.slice(5, head.indexOf(";")), image };
   }
-  const blob = await fetch(source).then((response) => response.blob());
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Could not read the photo"));
-    reader.readAsDataURL(blob);
-  });
+  const original = await fetch(source).then((response) => response.blob());
+  const blob = fit ? await fitImage(original) : original;
+  const dataUrl = await readDataUrl(blob);
   const [head, image] = dataUrl.split(",");
   return { mime: head.slice(5, head.indexOf(";")) || blob.type || "image/jpeg", image };
 }

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useLang } from "@/lib/i18n";
 
 export function Gate() {
+  const { t } = useLang();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,12 +20,12 @@ export function Gate() {
         body: JSON.stringify({ password }),
       });
       if (!response.ok) {
-        setError("Wrong password.");
+        setError(t.wrongPassword);
         return;
       }
       window.location.href = "/";
     } catch {
-      setError("Could not check the password.");
+      setError(t.passwordCheckFailed);
     } finally {
       setBusy(false);
     }
@@ -31,19 +33,19 @@ export function Gate() {
 
   return (
     <form className="gate" onSubmit={submit}>
-      <h1>GenAI Image Editor</h1>
-      <p className="subtitle">HMI Lab</p>
+      <h1>{t.title}</h1>
+      <p className="subtitle">{t.lab}</p>
       <input
         type="password"
         autoFocus
         autoComplete="current-password"
-        aria-label="Password"
-        placeholder="Password"
+        aria-label={t.password}
+        placeholder={t.password}
         value={password}
         onChange={(event) => setPassword(event.target.value)}
       />
       <button type="submit" disabled={busy || password === ""}>
-        Enter
+        {t.enter}
       </button>
       {error ? <p className="error">{error}</p> : null}
     </form>

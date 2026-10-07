@@ -315,8 +315,9 @@ export function Photo({
   }, [original]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const element = canvasRef.current;
+    if (!element) return;
+    const canvas: HTMLCanvasElement = element;
 
     function applyZoom(clientX: number, clientY: number, nextScale: number) {
       const current = viewRef.current;

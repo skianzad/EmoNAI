@@ -33,6 +33,8 @@ final class EditIslandsViewModel: ObservableObject {
     @Published var showIslandOverlay: Bool = true
     @Published var ssimThreshold: Double = 0.85
     @Published var minIslandArea: Int = 64
+    /// Live filter. Islands smaller than this stay in the version but are left out of the photo and the cursor.
+    @Published var islandAreaFilter: Int = 0
 
     /// Photo zoom/pan — owned here so tool switches never reset the view.
     @Published var canvasScale: CGFloat = 1
@@ -392,12 +394,16 @@ final class EditIslandsViewModel: ObservableObject {
             showAPIKeys = true
             return false
         }
-        let region = parent.combinedMask
+        let region = filteredMask(for: parent)
         guard region.contains(where: { $0 != 0 }) else {
             statusMessage = "This version has no mask to refine."
             return false
         }
-        let base = Compositor.composite(original: originalBuffer, layers: branchLayers(endingAt: parentID))
+        let base = Compositor.composite(
+            original: originalBuffer,
+            layers: branchLayers(endingAt: parentID),
+            minArea: islandAreaFilter
+        )
         guard let sourceImage = base.toUIImage(),
               let maskImage = ImageBuffer.visibleMaskImage(mask: region, width: parent.width, height: parent.height)
         else {
@@ -575,7 +581,9 @@ final class EditIslandsViewModel: ObservableObject {
 
         var best: Candidate?
         for (rank, item) in visibleLayersFrontToBack().enumerated() {
-            let hits = item.layer.islands.filter { $0.isEnabled && $0.containsAnyPixel(in: normalized) }
+            let hits = item.layer.islands.filter {
+                $0.isEnabled && $0.area >= islandAreaFilter && $0.containsAnyPixel(in: normalized)
+            }
             guard !hits.isEmpty else { continue }
             let candidate = Candidate(
                 layerID: item.layer.id,
@@ -605,6 +613,24 @@ final class EditIslandsViewModel: ObservableObject {
         scheduleOverlayRefresh()
     }
 
+    func setIslandAreaFilter(_ value: Int) {
+        let next = max(0, value)
+        guard next != islandAreaFilter else { return }
+        islandAreaFilter = next
+        if let layer = selectedLayer {
+            let allowed = Set(layer.islands.filter { $0.area >= next }.map(\.id))
+            selectedIslandIDs.formIntersection(allowed)
+        }
+        refreshPreview()
+    }
+
+    /// Change mask with islands under the size filter left out.
+    func filteredMask(for layer: EditLayer) -> [UInt8] {
+        guard islandAreaFilter > 0 else { return layer.combinedMask }
+        let kept = layer.islands.filter { $0.isEnabled && $0.area >= islandAreaFilter }
+        return EditLayer.rebuildCombinedMask(islands: kept, width: layer.width, height: layer.height)
+    }
+
     /// Later versions paint on top, so search those first. Hidden versions are skipped.
     private func visibleLayersFrontToBack() -> [(index: Int, layer: EditLayer)] {
         layers.enumerated().reversed().compactMap { offset, layer in
@@ -614,7 +640,11 @@ final class EditIslandsViewModel: ObservableObject {
 
     private func topmostIsland(atX x: Int, y: Int) -> (layerID: UUID, islandID: UUID)? {
         for item in visibleLayersFrontToBack() {
-            if let id = IslandSegmenter.hitTest(islands: item.layer.islands, x: x, y: y) {
+            if let id = IslandSegmenter.hitTest(
+                islands: item.layer.islands.filter { $0.area >= islandAreaFilter },
+                x: x,
+                y: y
+            ) {
                 return (item.layer.id, id)
             }
         }
@@ -750,7 +780,11 @@ final class EditIslandsViewModel: ObservableObject {
 
         // Patch only this island's pixels — no full recomposite.
         if compositeBuffer == nil {
-            compositeBuffer = Compositor.composite(original: originalBuffer, layers: layers)
+            compositeBuffer = Compositor.composite(
+                original: originalBuffer,
+                layers: layers,
+                minArea: islandAreaFilter
+            )
         } else if var buffer = compositeBuffer {
             let edited = layers[lIdx].editedPixels
             let orig = originalBuffer.rgba
@@ -767,7 +801,7 @@ final class EditIslandsViewModel: ObservableObject {
                     buffer.rgba[o + 1] = orig[o + 1]
                     buffer.rgba[o + 2] = orig[o + 2]
                     buffer.rgba[o + 3] = 255
-                    for layer in layers where layer.isVisible && layer.combinedMask[i] != 0 {
+                    for layer in layers where layer.isVisible && filteredMask(for: layer)[i] != 0 {
                         buffer.rgba[o] = layer.editedPixels[o]
                         buffer.rgba[o + 1] = layer.editedPixels[o + 1]
                         buffer.rgba[o + 2] = layer.editedPixels[o + 2]
@@ -850,7 +884,11 @@ final class EditIslandsViewModel: ObservableObject {
             return
         }
 
-        let mask = BooleanMaskOps.apply(op, a: a.combinedMask, b: b.combinedMask)
+        let mask = BooleanMaskOps.apply(
+            op,
+            a: filteredMask(for: a),
+            b: filteredMask(for: b)
+        )
         let area = BooleanMaskOps.area(of: mask)
         guard area > 0 else {
             statusMessage = "Boolean result is empty."
@@ -953,7 +991,7 @@ final class EditIslandsViewModel: ObservableObject {
             return
         }
         guard originalBuffer.width > 0, originalBuffer.height > 0 else { return }
-        let comp = Compositor.composite(original: originalBuffer, layers: layers)
+        let comp = Compositor.composite(original: originalBuffer, layers: layers, minArea: islandAreaFilter)
         compositeBuffer = comp
         compositeImage = comp.toUIImage()
         scheduleOverlayRefresh()
@@ -979,7 +1017,8 @@ final class EditIslandsViewModel: ObservableObject {
                 size: (originalBuffer.width, originalBuffer.height),
                 layers: self.layers,
                 selectedIslandIDs: self.selectedIslandIDs,
-                maxIslandsPerLayer: self.maxListedIslands
+                maxIslandsPerLayer: self.maxListedIslands,
+                minArea: self.islandAreaFilter
             )
             self.overlayImage = overlay.toUIImage()
         }
@@ -1013,7 +1052,8 @@ final class EditIslandsViewModel: ObservableObject {
                     selectedLayerID: selectedLayerID,
                     selectedIslandIDs: selectedIslandIDs,
                     ssimThreshold: ssimThreshold,
-                    minIslandArea: minIslandArea
+                    minIslandArea: minIslandArea,
+                    islandAreaFilter: islandAreaFilter
                 )
             )
             projectDocument = EditIslandsProjectDocument(data: data)
@@ -1043,6 +1083,7 @@ final class EditIslandsViewModel: ObservableObject {
             subpromptDrafts = [:]
             ssimThreshold = snapshot.ssimThreshold
             minIslandArea = snapshot.minIslandArea
+            islandAreaFilter = snapshot.islandAreaFilter
             clearHistory()
             resetCanvasZoom()
             refreshPreview()

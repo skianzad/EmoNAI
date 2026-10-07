@@ -1,4 +1,5 @@
 import type { Island } from "@/data/edits";
+import { uid } from "./uid";
 
 const colors = ["#e15b4c", "#3d7ee8", "#2f9d62", "#e0a23a", "#8b6ad6"];
 
@@ -183,7 +184,7 @@ export async function cutIslands(islands: Island[], points: { x: number; y: numb
         if (labels[i] === part.id) area += 1;
       }
       next.push({
-        id: crypto.randomUUID(),
+        id: uid(),
         label: parts.length === 2 ? (index === 0 ? "Cut A" : "Cut B") : `Cut ${index + 1}`,
         mask: maskUrl(labels, part.id, width, height),
         color: colors[(colorStart + piece++) % colors.length],

@@ -14,6 +14,7 @@ struct EditorView: View {
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
                     .background(Color(.systemBackground))
+                islandSizeFilter
                 Divider()
                 lists
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -201,6 +202,31 @@ struct EditorView: View {
         .accessibilityLabel(label)
     }
 
+    private var islandSizeFilter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Ignore small islands")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(vm.islandAreaFilter == 0 ? "Off" : "under \(vm.islandAreaFilter) px")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(vm.islandAreaFilter) },
+                    set: { vm.setIslandAreaFilter(Int($0)) }
+                ),
+                in: 0...8000,
+                step: 32
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(Color(.systemBackground))
+    }
+
     // MARK: - Version history (one layer per prompt)
 
     private var lists: some View {
@@ -213,12 +239,10 @@ struct EditorView: View {
                     ForEach(versionNodes) { node in
                         versionRow(node.layer, versionLabel: node.label, depth: node.depth)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if node.depth > 0 {
-                                    Button(role: .destructive) {
-                                        vm.deleteLayer(node.layer.id)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
+                                Button(role: .destructive) {
+                                    vm.deleteLayer(node.layer.id)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
                             }
                     }
@@ -226,7 +250,7 @@ struct EditorView: View {
             } header: {
                 Text("Version history")
             } footer: {
-                Text("Update regenerates that prompt. Subprompt sends this version’s image and mask. Swipe a subprompt left to delete it.")
+                Text("Update regenerates that prompt. Subprompt sends this version’s image and mask. Swipe any version left to delete it.")
             }
 
             Section {
@@ -283,6 +307,15 @@ struct EditorView: View {
             let childLabel = "\(label).\(children.count - offset)"
             appendVersion(child, label: childLabel, depth: depth + 1, into: &nodes)
         }
+    }
+
+    private func regionCountLabel(for layer: EditLayer) -> String {
+        let total = layer.islands.count
+        let shown = layer.islands.filter { $0.area >= vm.islandAreaFilter }.count
+        if vm.islandAreaFilter > 0, shown != total {
+            return "\(shown) of \(total) regions"
+        }
+        return "\(total) change region\(total == 1 ? "" : "s")"
     }
 
     private func versionRow(_ layer: EditLayer, versionLabel: String, depth: Int) -> some View {
@@ -351,7 +384,7 @@ struct EditorView: View {
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                Text("\(layer.islands.count) change region\(layer.islands.count == 1 ? "" : "s")")
+                Text(regionCountLabel(for: layer))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()

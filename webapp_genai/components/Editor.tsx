@@ -10,14 +10,18 @@ import { eraseIslands } from "@/lib/erase";
 import { keepInsideLasso } from "@/lib/lasso";
 import { cutIslands } from "@/lib/cut";
 import { downloadProject, packProject, unpackProject, type Snapshot } from "@/lib/project";
+import { useLang } from "@/lib/i18n";
+import { fitImage, readDataUrl } from "@/lib/shrink";
 import { splitIslands } from "@/lib/splitIslands";
+import { uid } from "@/lib/uid";
 import { Menu, type EditorChoice, type SelectionMode } from "./Menu";
 import { Photo } from "./Photo";
 import { Versions } from "./Versions";
 
-function handbagLayers(): Layer[] {
+function handbagLayers(prompts: Record<string, string>): Layer[] {
   return handbag.layers.map((layer) => ({
     ...layer,
+    prompt: prompts[layer.id] ?? layer.prompt,
     visible: true,
     edited: handbag.edited,
   }));
@@ -32,13 +36,19 @@ function handbagEnabled() {
 }
 
 export function Editor() {
+  const { t, lang } = useLang();
   const fileRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const [original, setOriginal] = useState<string | null>(handbag.original);
   const [photoName, setPhotoName] = useState(handbag.name);
   const [enabled, setEnabled] = useState<Record<string, boolean>>(handbagEnabled);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [layers, setLayers] = useState<Layer[]>(handbagLayers);
+  const [layers, setLayers] = useState<Layer[]>(() =>
+    handbagLayers({
+      cafe: "Move the handbag from the chair to the table.",
+      "cafe-people": "Remove the people in the back.",
+    })
+  );
   const [activeId, setActiveId] = useState(handbag.layers[0].id);
   const [aspect, setAspect] = useState(900 / 534);
   const [newPrompt, setNewPrompt] = useState("");
@@ -130,8 +140,21 @@ export function Editor() {
           return list.find((item) => item.ready)?.id ?? current;
         });
       })
-      .catch(() => setStatus("Could not load editors."));
+      .catch(() => setStatus(t.couldNotLoadEditors));
+    // Intentionally once on mount; status copy uses the language at that time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (original !== handbag.original) return;
+    const prompts: Record<string, string> = {
+      cafe: t.demoPromptBag,
+      "cafe-people": t.demoPromptPeople,
+    };
+    setLayers((current) =>
+      current.map((layer) => (prompts[layer.id] ? { ...layer, prompt: prompts[layer.id] } : layer))
+    );
+  }, [lang, t, original]);
 
   function activate(layerId: string) {
     setActiveId(layerId);
@@ -180,7 +203,7 @@ export function Editor() {
     );
     setSelectedIds([]);
     const count = remove.size;
-    setStatus(`Removed ${count} change region${count === 1 ? "" : "s"}`);
+    setStatus(t.removedRegions(count));
   }
 
   function deleteVersion(id: string) {
@@ -217,14 +240,14 @@ export function Editor() {
     if (!layer || points.length < 3) return;
     const islands = await keepInsideLasso(layer.islands, points, selectedIds);
     if (!islands) {
-      setStatus("Draw the lasso over the part to keep.");
+      setStatus(t.drawLasso);
       return;
     }
     remember();
     const kept = new Set(islands.map((island) => island.id));
     setLayers((current) => current.map((item) => (item.id === layer.id ? { ...item, islands } : item)));
     setSelectedIds((ids) => ids.filter((id) => kept.has(id)));
-    setStatus("Kept the lassoed part");
+    setStatus(t.keptLasso);
   }
 
   async function cutApart(points: { x: number; y: number }[]) {
@@ -232,7 +255,7 @@ export function Editor() {
     if (!layer || points.length < 2) return;
     const islands = await cutIslands(layer.islands, points, selectedIds);
     if (!islands) {
-      setStatus("Draw across the island to cut it apart.");
+      setStatus(t.drawCut);
       return;
     }
     remember();
@@ -240,7 +263,7 @@ export function Editor() {
     const before = layer.islands.length;
     setLayers((current) => current.map((item) => (item.id === layer.id ? { ...item, islands } : item)));
     setSelectedIds([]);
-    setStatus(`Cut into ${islands.length - before + 1} change regions`);
+    setStatus(t.cutInto(islands.length - before + 1));
   }
 
   function toggleVisible(id: string) {
@@ -252,11 +275,11 @@ export function Editor() {
 
   async function replaceRoot(layer: Layer) {
     if (!original) {
-      setStatus("Upload a photo first.");
+      setStatus(t.uploadFirst);
       return;
     }
     setBusy(true);
-    setStatus(`Running ${editorName}…`);
+    setStatus(t.running(editorName));
     try {
       const image = await callEditor(editorId, layer.prompt.trim(), original);
       const next = await splitIslands(original, image);
@@ -271,7 +294,7 @@ export function Editor() {
       setSelectedIds([]);
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Edit failed");
+      setStatus(error instanceof Error ? error.message : t.editFailed);
     } finally {
       setBusy(false);
     }
@@ -283,13 +306,13 @@ export function Editor() {
     if (!parent) return false;
 
     setBusy(true);
-    setStatus(replacing ? `Updating with ${editorName}…` : `Subprompt with ${editorName}…`);
+    setStatus(replacing ? t.updating(editorName) : t.subprompting(editorName));
     try {
       const source = await renderComposite(original, branchEndingAt(layers, parentId), enabled, minArea);
       const image = await callEditor(editorId, prompt, source);
       const next = await splitIslands(source, image);
 
-      const childId = replacing ?? crypto.randomUUID();
+      const childId = replacing ?? uid();
       remember();
       setLayers((current) => {
         if (replacing) {
@@ -315,7 +338,7 @@ export function Editor() {
       setStatus("");
       return true;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Edit failed");
+      setStatus(error instanceof Error ? error.message : t.editFailed);
       return false;
     } finally {
       setBusy(false);
@@ -341,17 +364,17 @@ export function Editor() {
   async function addVersion() {
     const prompt = newPrompt.trim();
     if (!original) {
-      setStatus("Upload a photo first.");
+      setStatus(t.uploadFirst);
       return;
     }
     if (!prompt || busy) return;
     setBusy(true);
-    setStatus(`Running ${editorName}…`);
+    setStatus(t.running(editorName));
     try {
       const image = await callEditor(editorId, prompt, original);
       const next = await splitIslands(original, image);
       const layer: Layer = {
-        id: crypto.randomUUID(),
+        id: uid(),
         parentId: null,
         prompt,
         visible: true,
@@ -366,35 +389,37 @@ export function Editor() {
       setNewPrompt("");
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Edit failed");
+      setStatus(error instanceof Error ? error.message : t.editFailed);
     } finally {
       setBusy(false);
     }
   }
 
-  function uploadPhoto(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
+  async function uploadPhoto(file: File) {
+    try {
+      const fitted = await fitImage(file);
+      const url = await readDataUrl(fitted);
       remember();
-      setOriginal(String(reader.result));
-      setPhotoName(file.name.replace(/\.[^.]+$/, "") || "GenAI Image Editor");
+      setOriginal(url);
+      setPhotoName(file.name.replace(/\.[^.]+$/, "") || t.title);
       setLayers([]);
       setActiveId("");
       setSelectedIds([]);
       setNewPrompt("");
       setDrafts({});
-      setStatus("");
-    };
-    reader.readAsDataURL(file);
+      setStatus(fitted === file ? "" : t.compressed(Math.round(fitted.size / 1024)));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : t.couldNotReadPhoto);
+    }
   }
 
   async function saveProcess() {
     if (!original) {
-      setStatus("Upload a photo before saving.");
+      setStatus(t.uploadBeforeSave);
       return;
     }
     setBusy(true);
-    setStatus("Saving…");
+    setStatus(t.saving);
     try {
       const file = await packProject({
         name: photoName,
@@ -410,9 +435,9 @@ export function Editor() {
       });
       downloadProject(file);
       const count = file.layers.length;
-      setStatus(`Saved ${count} version${count === 1 ? "" : "s"}`);
+      setStatus(t.savedVersions(count));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not save this process.");
+      setStatus(error instanceof Error ? error.message : t.couldNotSave);
     } finally {
       setBusy(false);
     }
@@ -420,12 +445,12 @@ export function Editor() {
 
   async function openProcess(file: File) {
     setBusy(true);
-    setStatus("Opening…");
+    setStatus(t.opening);
     try {
       const project = unpackProject(await file.text());
       const before = shot();
       setOriginal(project.original);
-      setPhotoName(project.name || "GenAI Image Editor");
+      setPhotoName(project.name || t.title);
       setLayers(project.layers);
       setActiveId(project.activeId || project.layers[project.layers.length - 1]?.id || "");
       setSelectedIds(project.selectedIds ?? []);
@@ -440,9 +465,9 @@ export function Editor() {
         ...Object.fromEntries(project.layers.flatMap((layer) => layer.islands.map((island) => [island.id, true]))),
       }));
       const count = project.layers.length;
-      setStatus(`Opened ${count} version${count === 1 ? "" : "s"}`);
+      setStatus(t.openedVersions(count));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not open this process.");
+      setStatus(error instanceof Error ? error.message : t.couldNotOpen);
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -472,14 +497,14 @@ export function Editor() {
           onDelete={deleteSelected}
         />
         <div className="title-block">
-          <h1 className="title">GenAI Image Editor</h1>
-          <p className="subtitle">HMI Lab</p>
+          <h1 className="title">{t.title}</h1>
+          <p className="subtitle">{t.lab}</p>
         </div>
         <div className="title-actions">
-          <button type="button" className="icon-btn" aria-label="Open process" onClick={() => fileRef.current?.click()}>
+          <button type="button" className="icon-btn" aria-label={t.openProcess} onClick={() => fileRef.current?.click()}>
             <FolderIcon />
           </button>
-          <button type="button" className="icon-btn" aria-label="Save process" disabled={busy} onClick={() => void saveProcess()}>
+          <button type="button" className="icon-btn" aria-label={t.saveProcess} disabled={busy} onClick={() => void saveProcess()}>
             <SaveIcon />
           </button>
           <input
@@ -497,7 +522,7 @@ export function Editor() {
 
       <div className="upload-row">
         <button type="button" className="upload-btn" onClick={() => photoRef.current?.click()}>
-          Upload a photo
+          {t.upload}
         </button>
         <input
           ref={photoRef}
@@ -506,7 +531,7 @@ export function Editor() {
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) uploadPhoto(file);
+            if (file) void uploadPhoto(file);
             event.target.value = "";
           }}
         />
@@ -531,7 +556,7 @@ export function Editor() {
           />
         ) : (
           <button type="button" className="upload-empty" onClick={() => photoRef.current?.click()}>
-            Upload a photo
+            {t.upload}
           </button>
         )}
       </div>

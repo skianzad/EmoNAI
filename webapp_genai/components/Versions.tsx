@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { DropPlace, Layer } from "@/data/versions";
+import { useLang } from "@/lib/i18n";
 
 type Props = {
   versions: Layer[];
@@ -27,6 +28,7 @@ type Props = {
 };
 
 export function Versions(props: Props) {
+  const { t } = useLang();
   const session = useRef<{ id: string; y: number; moved: boolean } | null>(null);
   const overRef = useRef<{ id: string; place: DropPlace } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -72,20 +74,20 @@ export function Versions(props: Props) {
 
   return (
     <section className="history">
-      <h2 className="history-title">Version history</h2>
+      <h2 className="history-title">{t.history}</h2>
       <div className="composer">
         <textarea
           className="field"
           rows={2}
-          placeholder="New prompt"
-          aria-label="New prompt"
+          placeholder={t.newPrompt}
+          aria-label={t.newPrompt}
           value={props.newPrompt}
           onChange={(event) => props.onNewPrompt(event.target.value)}
         />
         <button
           type="button"
           className="plus"
-          aria-label="Add prompt"
+          aria-label={t.addPrompt}
           disabled={props.busy || props.newPrompt.trim() === ""}
           onClick={props.onAdd}
         >
@@ -161,9 +163,10 @@ function VersionCard({
   onPointerMoveCard,
   onPointerUpCard,
 }: Props & DragProps & { version: Layer }) {
+  const { t } = useLang();
   const draft = drafts[version.id] ?? "";
   const shown = version.islands.filter((island) => island.area >= minArea);
-  const count = shown.length === 1 ? "1 change region" : `${shown.length} change regions`;
+  const count = t.regions(shown.length);
   const active = version.id === activeId;
   const label = labelOf(versions, version.id);
   const [editing, setEditing] = useState(false);
@@ -199,7 +202,7 @@ function VersionCard({
           type="button"
           className={active ? "mark on" : "mark"}
           aria-pressed={active}
-          aria-label={active ? "Active version" : "Make this version active"}
+          aria-label={active ? t.activeVersion : t.makeActive}
           onClick={() => onActivate(version.id)}
         />
         <button type="button" className="version-label" onClick={() => onActivate(version.id)}>
@@ -210,12 +213,12 @@ function VersionCard({
           type="button"
           className={version.visible ? "eye on" : "eye"}
           aria-pressed={version.visible}
-          aria-label={version.visible ? "Hide version" : "Show version"}
+          aria-label={version.visible ? t.hideVersion : t.showVersion}
           onClick={() => onVisible(version.id)}
         >
           <Eye open={version.visible} />
         </button>
-        <button type="button" className="delete" aria-label={`Delete ${label}`} onClick={() => onDelete(version.id)}>
+        <button type="button" className="delete" aria-label={t.deleteVersion(label)} onClick={() => onDelete(version.id)}>
           ×
         </button>
       </div>
@@ -224,7 +227,7 @@ function VersionCard({
           ref={fieldRef}
           className="field"
           rows={2}
-          aria-label={`Prompt ${label}`}
+          aria-label={t.promptFor(label)}
           value={version.prompt}
           onChange={(event) => onPrompt(version.id, event.target.value)}
           onBlur={() => {
@@ -253,7 +256,7 @@ function VersionCard({
                   type="button"
                   className={selected ? "selected" : ""}
                   style={{ background: island.color }}
-                  aria-label="Change region"
+                  aria-label={t.changeRegion}
                   aria-pressed={selected}
                   onClick={() => onSelect(island.id)}
                 />
@@ -267,7 +270,7 @@ function VersionCard({
           disabled={busy || version.prompt.trim() === ""}
           onClick={() => onRun(version.id)}
         >
-          Update
+          {t.update}
         </button>
       </div>
       {subpromptOpen ? (
@@ -275,13 +278,13 @@ function VersionCard({
           <textarea
             className="field"
             rows={2}
-            placeholder="Further change inside this mask"
-            aria-label={`Further change ${label}`}
+            placeholder={t.furtherChange}
+            aria-label={t.furtherFor(label)}
             value={draft}
             onChange={(event) => onDraft(version.id, event.target.value)}
           />
           <div className="action-row">
-            <span className="version-note">Sends the edited image</span>
+            <span className="version-note">{t.sendsEdited}</span>
             <button
               type="button"
               className="subprompt"
@@ -293,7 +296,7 @@ function VersionCard({
               }}
             >
               <TurnArrow />
-              Subprompt
+              {t.subprompt}
             </button>
           </div>
         </div>
@@ -301,7 +304,7 @@ function VersionCard({
         <button
           type="button"
           className="plus"
-          aria-label={`Add subprompt to ${label}`}
+          aria-label={t.addSubprompt(label)}
           onClick={() => {
             onActivate(version.id);
             setSubpromptOpen(true);

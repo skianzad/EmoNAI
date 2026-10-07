@@ -1,4 +1,5 @@
 import type { Island } from "@/data/edits";
+import { uid } from "./uid";
 
 const colors = ["#e15b4c", "#3d7ee8", "#2f9d62", "#e0a23a", "#8b6ad6"];
 
@@ -98,7 +99,7 @@ export async function splitIslands(
       edited: aligned,
       islands: [
         {
-          id: crypto.randomUUID(),
+          id: uid(),
           label: "Island 1",
           mask: maskUrl(full, 1, width, height),
           color: colors[0],
@@ -111,7 +112,7 @@ export async function splitIslands(
   return {
     edited: aligned,
     islands: kept.map((item, index) => ({
-      id: crypto.randomUUID(),
+      id: uid(),
       label: `Island ${index + 1}`,
       mask: maskUrl(labels, item.id, width, height),
       color: colors[index % colors.length],

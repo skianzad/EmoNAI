@@ -1,6 +1,7 @@
 "use client";
 
 import type { EditorId } from "@/data/editors";
+import { useLang, type Lang } from "@/lib/i18n";
 
 export type SelectionMode = "tap" | "box" | "lasso" | "scissors" | "eraser";
 
@@ -49,12 +50,14 @@ export function Menu({
   canDelete,
   onDelete,
 }: Props) {
+  const { t, lang, setLang } = useLang();
+
   return (
     <div className="menu-root">
       <button
         type="button"
         className={open ? "hamburger open" : "hamburger"}
-        aria-label="Settings"
+        aria-label={t.settings}
         aria-expanded={open}
         onClick={onToggle}
       >
@@ -67,17 +70,28 @@ export function Menu({
         <div className="menu">
           <div className="undo-row">
             <button type="button" disabled={!canUndo} onClick={onUndo}>
-              Undo
+              {t.undo}
             </button>
             <button type="button" disabled={!canRedo} onClick={onRedo}>
-              Redo
+              {t.redo}
             </button>
             <button type="button" disabled={!canDelete} onClick={onDelete}>
-              Delete
+              {t.delete}
             </button>
           </div>
           <label className="setting">
-            <span className="setting-label">Editor</span>
+            <span className="setting-label">{t.language}</span>
+            <select
+              className="editor-select"
+              value={lang}
+              onChange={(event) => setLang(event.target.value as Lang)}
+            >
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+            </select>
+          </label>
+          <label className="setting">
+            <span className="setting-label">{t.editor}</span>
             <select
               className="editor-select"
               value={editorId}
@@ -85,7 +99,7 @@ export function Menu({
             >
               {editors.map((editor) => (
                 <option key={editor.id} value={editor.id} disabled={!editor.ready}>
-                  {editor.ready ? editor.name : `${editor.name} — No key`}
+                  {editor.ready ? editor.name : t.noKey(editor.name)}
                 </option>
               ))}
             </select>
@@ -93,8 +107,8 @@ export function Menu({
 
           <label className="setting">
             <span className="setting-label">
-              Ignore small islands
-              <span>{minArea === 0 ? "Off" : `under ${minArea.toLocaleString()} px`}</span>
+              {t.ignoreSmall}
+              <span>{minArea === 0 ? t.off : t.underPx(minArea.toLocaleString())}</span>
             </span>
             <input
               type="range"
@@ -108,7 +122,7 @@ export function Menu({
 
           <label className="setting">
             <span className="setting-label">
-              Eraser size
+              {t.eraserSize}
               <span>{eraserSize} px</span>
             </span>
             <span className="eraser-row">
@@ -125,13 +139,13 @@ export function Menu({
           </label>
 
           <div className="setting">
-            <span className="setting-label">Selection</span>
+            <span className="setting-label">{t.selection}</span>
             <div className="picker" role="tablist">
               <button
                 type="button"
                 role="tab"
-                aria-label="Tap"
-                title="Tap"
+                aria-label={t.tap}
+                title={t.tap}
                 aria-selected={selection === "tap"}
                 className={selection === "tap" ? "active" : ""}
                 onClick={() => onSelection("tap")}
@@ -141,8 +155,8 @@ export function Menu({
               <button
                 type="button"
                 role="tab"
-                aria-label="Box"
-                title="Box"
+                aria-label={t.box}
+                title={t.box}
                 aria-selected={selection === "box"}
                 className={selection === "box" ? "active" : ""}
                 onClick={() => onSelection("box")}
@@ -152,8 +166,8 @@ export function Menu({
               <button
                 type="button"
                 role="tab"
-                aria-label="Lasso"
-                title="Lasso"
+                aria-label={t.lasso}
+                title={t.lasso}
                 aria-selected={selection === "lasso"}
                 className={selection === "lasso" ? "active" : ""}
                 onClick={() => onSelection("lasso")}
@@ -163,8 +177,8 @@ export function Menu({
               <button
                 type="button"
                 role="tab"
-                aria-label="Scissors"
-                title="Scissors"
+                aria-label={t.scissors}
+                title={t.scissors}
                 aria-selected={selection === "scissors"}
                 className={selection === "scissors" ? "active" : ""}
                 onClick={() => onSelection("scissors")}
@@ -174,8 +188,8 @@ export function Menu({
               <button
                 type="button"
                 role="tab"
-                aria-label="Eraser"
-                title="Eraser"
+                aria-label={t.eraser}
+                title={t.eraser}
                 aria-selected={selection === "eraser"}
                 className={selection === "eraser" ? "active" : ""}
                 onClick={() => onSelection("eraser")}

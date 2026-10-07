@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { editorChoices, type EditorId } from "@/data/editors";
 import { runEditor } from "@/lib/runEdit";
+import { MAX_IMAGE_BYTES } from "@/lib/shrink";
 
 export const maxDuration = 120;
 
@@ -16,6 +17,9 @@ export async function POST(request: Request) {
 
   if (!ids.has(editor) || !prompt || !image) {
     return NextResponse.json({ error: "Choose an editor, a prompt, and a photo." }, { status: 400 });
+  }
+  if (Buffer.byteLength(image, "base64") > MAX_IMAGE_BYTES) {
+    return NextResponse.json({ error: "Photo must be 500 KB or smaller." }, { status: 413 });
   }
 
   try {
