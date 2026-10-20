@@ -5,7 +5,7 @@ let cached: Record<string, string> | null = null;
 
 function fileKeys(): Record<string, string> {
   if (cached) return cached;
-  const file = path.join(process.cwd(), "..", "genai_image_editing", ".env");
+  const file = path.join(process.cwd(), "genai_image_editing", ".env");
   const out: Record<string, string> = {};
   if (fs.existsSync(file)) {
     for (const line of fs.readFileSync(file, "utf8").split("\n")) {

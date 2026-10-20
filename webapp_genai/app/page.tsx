@@ -1,19 +1,17 @@
 "use client";
 
-import { Editor } from "@/components/Editor";
+import { AiEditApp } from "@/components/ai-edit/AiEditApp";
 import { Phone } from "@/components/Phone";
-import { useLang } from "@/lib/i18n";
 
 export default function Page() {
-  const { t } = useLang();
   return (
     <main className="stage">
       <Phone>
-        <Editor />
+        <AiEditApp />
       </Phone>
       <p className="caption">
-        {t.title}
-        <span>{t.lab}</span>
+        AI Edit
+        <span>HMI Lab</span>
       </p>
     </main>
   );

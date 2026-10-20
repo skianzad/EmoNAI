@@ -6,6 +6,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  overscroll-behavior: none;
 }
 
 body {
@@ -160,7 +161,8 @@ button {
   flex-direction: column;
   overflow: hidden;
   border-radius: 36px;
-  background: #f6f4f1;
+  background: #111214;
+  color: #f4f4f4;
 }
 
 .camera {
@@ -176,7 +178,7 @@ button {
   box-shadow: 0 0 0 2px #1a1a1c;
 }
 
-.status {
+.screen > .status {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -184,6 +186,7 @@ button {
   padding: 10px 22px 0;
   font-size: 13px;
   font-weight: 600;
+  color: #f4f4f4;
 }
 
 .status-icons {
@@ -197,7 +200,7 @@ button {
   height: 4px;
   margin: 8px auto 10px;
   border-radius: 4px;
-  background: #1c1c1e;
+  background: #eee;
   opacity: 0.85;
 }
 

@@ -1,0 +1,61 @@
+.cmap-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.cmap-toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.cmap-file {
+  display: block;
+  text-align: center;
+}
+
+.cmap-text {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: #3d7ee8;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cmap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cmap-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #e4dfd6;
+}
+
+.cmap-name {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.cmap-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #6e675e;
+}
+
+.cmap-size input[type="range"] {
+  flex: 1;
+}

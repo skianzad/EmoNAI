@@ -217,27 +217,27 @@ type LangContextValue = {
 };
 
 const LangContext = createContext<LangContextValue>({
-  lang: "en",
+  lang: "zh",
   setLang: () => {},
-  t: en,
+  t: zh,
 });
 
 export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>("en");
+  const [lang, setLangState] = useState<Lang>("zh");
 
   useEffect(() => {
     const saved = localStorage.getItem("lang");
-    if (saved === "en" || saved === "zh") {
-      setLang(saved);
-      return;
-    }
-    if (navigator.language.toLowerCase().startsWith("zh")) setLang("zh");
+    if (saved === "en" || saved === "zh") setLangState(saved);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("lang", lang);
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
+
+  function setLang(next: Lang) {
+    localStorage.setItem("lang", next);
+    setLangState(next);
+  }
 
   return (
     <LangContext.Provider value={{ lang, setLang, t: dictionaries[lang] }}>{children}</LangContext.Provider>
