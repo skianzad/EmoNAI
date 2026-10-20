@@ -5,22 +5,27 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function rootFor(kind: string) {
-  const folder = kind === "room" ? "room-scene" : "face-scene";
-  return path.join(process.cwd(), "data", folder);
+/** Base room masks from the last good push. Edits never overwrite this file. */
+function roomSegmentsFile() {
+  return path.join(process.cwd(), "data", "room-segments.json");
 }
 
-function metaFile(kind: string) {
-  return path.join(rootFor(kind), "meta.json");
+function faceRoot() {
+  return path.join(process.cwd(), "data", "face-scene");
+}
+
+function faceMetaFile() {
+  return path.join(faceRoot(), "meta.json");
+}
+
+function faceLayerFile(id: string) {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(faceRoot(), "layers", `${safe}.png`);
 }
 
 function backgroundFile(kind: string) {
-  return path.join(rootFor(kind), "background.jpg");
-}
-
-function layerFile(kind: string, id: string) {
-  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(rootFor(kind), "layers", `${safe}.png`);
+  const folder = kind === "room" ? "room-scene" : "face-scene";
+  return path.join(process.cwd(), "data", folder, "background.jpg");
 }
 
 function parseDataUrl(value: string) {
@@ -38,21 +43,52 @@ async function readDataUrl(file: string, mime: string) {
   }
 }
 
+async function exists(file: string) {
+  return fs
+    .access(file)
+    .then(() => true)
+    .catch(() => false);
+}
+
+function asBaseObjects(listed: Array<Record<string, unknown>>) {
+  return listed.map((object) => {
+    const next = { ...object };
+    delete next.layer;
+    next.tint = null;
+    next.shade = 0;
+    next.dx = 0;
+    next.dy = 0;
+    next.scale = 100;
+    next.hidden = false;
+    delete next.cover;
+    delete next.blur;
+    return next;
+  });
+}
+
 export async function GET(request: Request) {
   const kind = new URL(request.url).searchParams.get("kind") === "room" ? "room" : "face";
   try {
     const background = await readDataUrl(backgroundFile(kind), "image/jpeg");
-    // Room: only the empty background is durable. Edits stay in memory.
+
     if (kind === "room") {
-      return NextResponse.json({ objects: [], background });
+      try {
+        const text = await fs.readFile(roomSegmentsFile(), "utf8");
+        const saved = JSON.parse(text) as { objects?: Array<Record<string, unknown>> };
+        const listed = Array.isArray(saved.objects) ? saved.objects : [];
+        return NextResponse.json({ objects: asBaseObjects(listed), background });
+      } catch {
+        return NextResponse.json({ objects: [], background });
+      }
     }
-    const text = await fs.readFile(metaFile(kind), "utf8");
+
+    const text = await fs.readFile(faceMetaFile(), "utf8");
     const saved = JSON.parse(text) as { objects?: Array<Record<string, unknown>> };
     const listed = Array.isArray(saved.objects) ? saved.objects : [];
     const objects = await Promise.all(
       listed.map(async (object) => {
         const id = typeof object.id === "string" ? object.id : "";
-        const layer = id ? await readDataUrl(layerFile(kind, id), "image/png") : "";
+        const layer = id ? await readDataUrl(faceLayerFile(id), "image/png") : "";
         const next = { ...object };
         if (layer) next.layer = layer;
         else delete next.layer;
@@ -75,62 +111,50 @@ export async function POST(request: Request) {
       object && typeof object.mask === "string" && typeof object.name === "string" && typeof object.id === "string"
   );
 
-  const root = rootFor(kind);
-  await fs.mkdir(root, { recursive: true });
-
-  // Room persists only the empty background — never segment edits or layers.
-  if (kind === "room") {
-    if (background.startsWith("data:")) {
-      const bgPath = backgroundFile(kind);
-      const exists = await fs
-        .access(bgPath)
-        .then(() => true)
-        .catch(() => false);
-      if (!exists) {
-        const parsed = parseDataUrl(background);
-        if (parsed) await fs.writeFile(bgPath, parsed.buffer);
-      }
+  // Empty background: write once, never overwrite.
+  if (background.startsWith("data:")) {
+    const bgPath = backgroundFile(kind);
+    await fs.mkdir(path.dirname(bgPath), { recursive: true });
+    if (!(await exists(bgPath))) {
+      const parsed = parseDataUrl(background);
+      if (parsed) await fs.writeFile(bgPath, parsed.buffer);
     }
-    const hasBg = await fs
-      .access(backgroundFile(kind))
-      .then(() => true)
-      .catch(() => false);
-    // Drop any old meta/layers so edits never reload after restart.
-    await fs.rm(path.join(root, "layers"), { recursive: true, force: true }).catch(() => undefined);
-    await fs.rm(metaFile(kind), { force: true }).catch(() => undefined);
-    if (!hasBg && !background.startsWith("data:")) {
+  }
+
+  if (kind === "room") {
+    // Keep the pushed base segments forever. Only create the file if missing.
+    if (usable.length > 0 && !(await exists(roomSegmentsFile()))) {
+      const metaObjects = asBaseObjects(usable as Array<Record<string, unknown>>);
+      await fs.mkdir(path.dirname(roomSegmentsFile()), { recursive: true });
+      await fs.writeFile(roomSegmentsFile(), JSON.stringify({ objects: metaObjects }));
+    }
+    const hasBg = await exists(backgroundFile("room"));
+    const hasSeg = await exists(roomSegmentsFile());
+    if (!hasBg && !hasSeg && !background.startsWith("data:") && usable.length === 0) {
       return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
     }
-    return NextResponse.json({ ok: true, count: 0, background: hasBg || background.startsWith("data:") });
+    return NextResponse.json({ ok: true, count: hasSeg ? 1 : 0, background: hasBg });
   }
 
   if (usable.length === 0) {
     return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
   }
 
+  const root = faceRoot();
   const layerDir = path.join(root, "layers");
   await fs.mkdir(layerDir, { recursive: true });
-
-  if (background.startsWith("data:")) {
-    const parsed = parseDataUrl(background);
-    if (parsed) await fs.writeFile(backgroundFile(kind), parsed.buffer);
-  }
 
   const metaObjects = [];
   for (const object of usable) {
     const { layer, ...rest } = object as { layer?: string; id: string; name: string; mask: string };
     if (typeof layer === "string" && layer.startsWith("data:")) {
       const parsed = parseDataUrl(layer);
-      if (parsed) await fs.writeFile(layerFile(kind, object.id), parsed.buffer);
+      if (parsed) await fs.writeFile(faceLayerFile(object.id), parsed.buffer);
     }
     metaObjects.push(rest);
   }
 
-  await fs.writeFile(metaFile(kind), JSON.stringify({ objects: metaObjects }, null, 0));
-  const hasBg = await fs
-    .access(backgroundFile(kind))
-    .then(() => true)
-    .catch(() => false);
-
+  await fs.writeFile(faceMetaFile(), JSON.stringify({ objects: metaObjects }, null, 0));
+  const hasBg = await exists(backgroundFile("face"));
   return NextResponse.json({ ok: true, count: metaObjects.length, background: hasBg });
 }

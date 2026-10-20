@@ -4,10 +4,11 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { useLang } from "@/lib/i18n";
 import type { EditorId } from "@/data/editors";
 import { callEditor } from "@/lib/callEditor";
-import { loadSegments, saveRoomBackground, saveSegments } from "@/lib/faceSegments";
+import { loadSegments, resetRoomEdits, saveRoomBackground, saveSegments } from "@/lib/faceSegments";
 import {
   fitEdited,
   generateEmptyBackground,
+  isBackdrop,
   renderLocal,
   segmentPhoto,
   segmentsFromIslands,
@@ -110,22 +111,24 @@ const PALETTES: Record<Palette, { name: string; hex: string }[]> = {
     { name: "Sage", hex: "#8a9a8a" },
     { name: "Charcoal", hex: "#3a3a3e" },
   ],
-  warm: [
-    { name: "Red", hex: "#e23b3b" },
-    { name: "Coral", hex: "#f07a5a" },
-    { name: "Mustard", hex: "#d4a017" },
-    { name: "Rust", hex: "#a65a32" },
-    { name: "Wine", hex: "#7a3048" },
-    { name: "Blush", hex: "#e8b4b8" },
-  ],
-  cool: [
-    { name: "Navy", hex: "#2a4a7a" },
-    { name: "Teal", hex: "#2a7a72" },
-    { name: "Forest", hex: "#2f5a40" },
-    { name: "Lilac", hex: "#b0a0c8" },
-    { name: "Sky", hex: "#7ec8e8" },
-    { name: "Graphite", hex: "#4a4e56" },
-  ],
+  // warm: [
+  //   { name: "Red", hex: "#e23b3b" },
+  //   { name: "Coral", hex: "#f07a5a" },
+  //   { name: "Mustard", hex: "#d4a017" },
+  //   { name: "Rust", hex: "#a65a32" },
+  //   { name: "Wine", hex: "#7a3048" },
+  //   { name: "Blush", hex: "#e8b4b8" },
+  // ],
+  // cool: [
+  //   { name: "Navy", hex: "#2a4a7a" },
+  //   { name: "Teal", hex: "#2a7a72" },
+  //   { name: "Forest", hex: "#2f5a40" },
+  //   { name: "Lilac", hex: "#b0a0c8" },
+  //   { name: "Sky", hex: "#7ec8e8" },
+  //   { name: "Graphite", hex: "#4a4e56" },
+  // ],
+  warm: [],
+  cool: [],
 };
 
 const SHADES = [
@@ -248,8 +251,9 @@ export function AiEditApp() {
   const tx = (en: string, cn: string) => (zh ? cn : en);
 
   const editing = mode !== "photo";
-  const current = objects.find((object) => object.id === selected) ?? null;
-  const visible = objects.filter((object) => !object.hidden);
+  const current = objects.find((object) => object.id === selected && !isBackdrop(object.name)) ?? null;
+  // Background / backdrop segments are never selectable or boxed.
+  const visible = objects.filter((object) => !object.hidden && !isBackdrop(object.name));
 
   useEffect(() => {
     loadSegments("face")
@@ -259,8 +263,12 @@ export function AiEditApp() {
       .catch(() => undefined);
     loadSegments("room")
       .then((saved) => {
-        // Room disk: empty background only. Segment edits stay in-memory for the session.
-        if (saved?.background) bgCache.current.set(SCENE, saved.background);
+        if (!saved) return;
+        if (saved.background) bgCache.current.set(SCENE, saved.background);
+        // Always load the saved base masks (from room-segments.json). Session edits are not on disk.
+        if (saved.objects.length) {
+          cache.current.set(SCENE, resetRoomEdits(saved.objects));
+        }
       })
       .catch(() => undefined);
   }, []);
@@ -505,8 +513,18 @@ export function AiEditApp() {
     try {
       const disk = source === SCENE ? await loadSegments("room") : null;
       if (disk?.background) bgCache.current.set(source, disk.background);
-      // Always segment fresh for the session — disk only stores the empty background.
-      const raw = await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects");
+      // Prefer the pushed room-segments.json — never re-run color-map when it exists.
+      // Session edits (move/remove/tint) stay in memory only.
+      let raw: SegmentObject[];
+      if (source === SCENE && disk?.objects?.length) {
+        raw = resetRoomEdits(disk.objects);
+      } else {
+        raw = await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects");
+        if (source === SCENE && raw.length > 0) {
+          // Creates room-segments.json only if missing; never overwrites the pushed file.
+          await saveSegments("room", raw, bgCache.current.get(source) || undefined);
+        }
+      }
       const next = source === SCENE ? await tightenSegments(raw) : raw;
       if (source === SCENE) await ensureEmptyBackground(source, next);
       cache.current.set(source, structuredClone(next));
@@ -1036,6 +1054,8 @@ export function AiEditApp() {
   function startBox(event: PointerEvent<HTMLElement>, object: SegmentObject, face: boolean, kind: "move" | "resize") {
     event.stopPropagation();
     event.preventDefault();
+    if (!face && isBackdrop(object.name)) return;
+    if (face && /background|backdrop/i.test(object.name)) return;
     if (face) setFaceSelected(object.id);
     else {
       setSelected(object.id);
@@ -1455,6 +1475,7 @@ export function AiEditApp() {
                     );
                   })}
                 </div>
+                {/* Suggested / Warm / Cool tabs hidden — show suggested swatches + picker only.
                 <div className="ae-picks">
                   {(["ai", "warm", "cool"] as Palette[]).map((item) => (
                     <button key={item} type="button" className={palette === item ? "ae-variant on" : "ae-variant"} onClick={() => setPalette(item)}>
@@ -1462,6 +1483,7 @@ export function AiEditApp() {
                     </button>
                   ))}
                 </div>
+                */}
               </div>
             </div>
           ) : mode === "review" ? (
