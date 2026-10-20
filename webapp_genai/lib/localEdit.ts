@@ -14,6 +14,13 @@ export function isBackdrop(name: string) {
 
 export type Box = { x: number; y: number; w: number; h: number };
 
+/** One cell from a 3×4 AI color pack (sofa / chair). */
+export type ColorVariant = {
+  hex: string;
+  shade: number;
+  layer: string;
+};
+
 export type SegmentObject = {
   id: string;
   name: string;
@@ -30,9 +37,38 @@ export type SegmentObject = {
   cover?: number;
   /** Edited pixels for this segment, masked, in the same frame as the original photo. */
   layer?: string;
+  /** Layer before an AI color pack (restore via Original). */
+  baseLayer?: string;
+  /** Pre-baked 3 colors × 4 shades from one contact-sheet generation. */
+  variants?: ColorVariant[];
   /** Blur radius in pixels, used for a background region. */
   blur?: number;
+  /** Pre-baked add-on (e.g. curtain). Not in the original photo; hide = skip draw. */
+  suggested?: boolean;
 };
+
+/** Shade steps used in the sofa/chair color pack (4 shades). */
+export const VARIANT_SHADES = [-2, -1, 0, 1] as const;
+
+export function isFurnitureRecolor(name: string) {
+  return /sofa|couch|chair|armchair|loveseat|ottoman/i.test(name);
+}
+
+/** Pick 3 hexes for the pack: primary first, then fill from the palette. */
+export function pickVariantColors(primary: string, palette: { hex: string }[]) {
+  const colors: string[] = [];
+  const add = (hex: string) => {
+    const next = hex.toLowerCase();
+    if (!colors.some((item) => item.toLowerCase() === next)) colors.push(hex);
+  };
+  add(primary);
+  for (const swatch of palette) {
+    if (colors.length >= 3) break;
+    add(swatch.hex);
+  }
+  while (colors.length < 3) add(palette[colors.length % Math.max(1, palette.length)]?.hex || primary);
+  return colors.slice(0, 3);
+}
 
 const TINT = 0.5;
 
@@ -50,28 +86,85 @@ async function imageBlob(src: string) {
   return response.blob();
 }
 
+export type GuideBox = { name: string; left: number; top: number; width: number; height: number };
+
+/** Local segment from a guide box — used when color-map is unavailable. */
+export async function segmentFromGuide(src: string, guide: GuideBox): Promise<SegmentObject> {
+  const original = await loadImage(src);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not create a segment");
+  const x = Math.round(guide.left * width);
+  const y = Math.round(guide.top * height);
+  const w = Math.max(8, Math.round(guide.width * width));
+  const h = Math.max(8, Math.round(guide.height * height));
+  ctx.fillStyle = "#fff";
+  // Soft rounded region so edges are not a hard rectangle.
+  const radius = Math.min(24, Math.round(Math.min(w, h) * 0.2));
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+  ctx.fill();
+  const soft = softenMask(canvas, width, height, Math.max(2, Math.round(Math.min(w, h) * 0.04)));
+  return {
+    id: uid(),
+    name: guide.name,
+    keyColor: "#7CFC00",
+    tint: null,
+    shade: 0,
+    scale: 100,
+    hidden: false,
+    dx: 0,
+    dy: 0,
+    mask: soft.toDataURL("image/png"),
+    box: {
+      x: guide.left,
+      y: guide.top,
+      w: guide.width,
+      h: guide.height,
+    },
+  };
+}
+
 export async function segmentPhoto(
   editorId: string,
   src: string,
   kind: "objects" | "face" | "room" = "objects",
-  guide?: { name: string; left: number; top: number; width: number; height: number }[]
+  guide?: GuideBox[]
 ) {
   const blob = await fitImage(await imageBlob(src));
   const dataUrl = await readDataUrl(blob);
   const [head, image] = dataUrl.split(",");
-  const response = await fetch("/api/color-map", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      editor: editorId,
-      image,
-      mime: head.slice(5, head.indexOf(";")) || "image/jpeg",
-      kind,
-      prompt: guide && guide.length > 0 ? guidePrompt(guide) : undefined,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/color-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        editor: editorId,
+        image,
+        mime: head.slice(5, head.indexOf(";")) || "image/jpeg",
+        kind,
+        prompt: guide && guide.length > 0 ? guidePrompt(guide) : undefined,
+      }),
+    });
+  } catch {
+    if (guide?.length) return Promise.all(guide.map((item) => segmentFromGuide(src, item)));
+    throw new Error("Could not reach the editor. Check your network and try again.");
+  }
   const body = await response.json().catch(() => ({ error: "Edit failed" }));
-  if (!response.ok) throw new Error(body.error || "Edit failed");
+  if (!response.ok) {
+    if (guide?.length) return Promise.all(guide.map((item) => segmentFromGuide(src, item)));
+    throw new Error(body.error || "Edit failed");
+  }
   const named = Array.isArray(body.items) ? (body.items as NamedColor[]) : [];
   const paintedSrc = String(body.image ?? "");
   const byColor = await segmentsFromColors(
@@ -85,6 +178,7 @@ export async function segmentPhoto(
     kind === "room" ? 110 : 58
   );
   if (byColor.length > 0) return byColor;
+  if (guide?.length) return Promise.all(guide.map((item) => segmentFromGuide(src, item)));
   const split = await splitIslands(dataUrl, paintedSrc);
   const painted = await objectsFromPaint(paintedSrc, split.islands, named);
   return Promise.all(
@@ -334,6 +428,107 @@ export type PrepareProgress = (message: string) => void;
  * Ask Nano Banana to erase every identified segment (white in the union mask)
  * and inpaint a clean empty room. One edit call — no per-object passes.
  */
+/**
+ * One Nano Banana call → 3×4 contact sheet of the same photo with only `object`
+ * recolored. Cells are sliced into masked layers so the UI can switch instantly.
+ * Layout: columns = colors (left→right), rows = shades (dark→light, top→bottom).
+ */
+export async function generateColorVariants(
+  editorId: string,
+  photoSrc: string,
+  object: SegmentObject,
+  colors: string[],
+  shades: number[],
+  toShade: (hex: string, shade: number) => string
+): Promise<ColorVariant[]> {
+  const cols = Math.min(3, colors.length);
+  const rows = Math.min(4, shades.length);
+  if (cols < 1 || rows < 1) return [];
+
+  const legend: string[] = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const hex = toShade(colors[col], shades[row]).toUpperCase();
+      legend.push(`row ${row + 1} col ${col + 1}: ${object.name} in ${hex}`);
+    }
+  }
+
+  const prompt = [
+    `Create a clean ${cols} by ${rows} contact sheet of THIS exact photograph.`,
+    `Columns (left to right) are ${cols} upholstery colors; rows (top to bottom) are ${rows} shade steps from darkest to lightest.`,
+    `Each cell must be the full original photo with ONLY the ${object.name} recolored photorealistically. Do not invent objects or change the room, camera, lighting, or other furniture.`,
+    `No text labels, no thick borders. Equal cell sizes, thin light gutters only.`,
+    `Cell colors: ${legend.join("; ")}.`,
+  ].join(" ");
+
+  const sheet = await callEditor(editorId, prompt, photoSrc);
+  const cells = await sliceContactSheet(sheet, cols, rows);
+  const photo = await loadImage(photoSrc);
+  const width = photo.naturalWidth;
+  const height = photo.naturalHeight;
+  const variants: ColorVariant[] = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const cell = cells[row * cols + col];
+      if (!cell) continue;
+      const layer = await layerFromCell(cell, object.mask, width, height);
+      if (!layer) continue;
+      variants.push({ hex: colors[col], shade: shades[row], layer });
+    }
+  }
+  return variants;
+}
+
+async function sliceContactSheet(sheetSrc: string, cols: number, rows: number) {
+  const sheet = await loadImage(sheetSrc);
+  const cellW = sheet.naturalWidth / cols;
+  const cellH = sheet.naturalHeight / rows;
+  const insetX = cellW * 0.03;
+  const insetY = cellH * 0.03;
+  const cells: string[] = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(cellW - insetX * 2));
+      canvas.height = Math.max(1, Math.round(cellH - insetY * 2));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        cells.push("");
+        continue;
+      }
+      ctx.drawImage(
+        sheet,
+        col * cellW + insetX,
+        row * cellH + insetY,
+        cellW - insetX * 2,
+        cellH - insetY * 2,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      cells.push(canvas.toDataURL("image/jpeg", 0.92));
+    }
+  }
+  return cells;
+}
+
+async function layerFromCell(cellSrc: string, maskSrc: string, width: number, height: number) {
+  if (!cellSrc) return "";
+  const cell = await loadImage(cellSrc);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(cell, 0, 0, width, height);
+  ctx.globalCompositeOperation = "destination-in";
+  const mask = await loadImage(maskSrc);
+  ctx.drawImage(mask, 0, 0, width, height);
+  return canvas.toDataURL("image/png");
+}
+
 export async function generateEmptyBackground(editorId: string, originalSrc: string, objects: SegmentObject[]) {
   const foreground = objects.filter((object) => !isBackdrop(object.name));
   if (foreground.length === 0) return originalSrc;
@@ -459,15 +654,17 @@ export async function renderLocal(
     const cut = await cutout(original, object.mask, width, height);
     if (!cut) continue;
     const scale = object.scale / 100;
+    // Suggested add-ons (curtain, etc.) are not in the original — never punch holes for them.
+    const additive = Boolean(object.suggested);
 
     if (object.layer) {
       if (object.hidden) {
-        fillVacated(ctx, cut.canvas, fill, width, height);
+        if (!additive) fillVacated(ctx, cut.canvas, fill, width, height);
         continue;
       }
       const sprite = await loadImage(object.layer);
       const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
-      if (moved) {
+      if (moved && !additive) {
         fillVacated(ctx, cut.canvas, fill, width, height);
       }
       ctx.save();
@@ -484,12 +681,12 @@ export async function renderLocal(
     }
 
     if (object.hidden) {
-      fillVacated(ctx, cut.canvas, fill, width, height);
+      if (!additive) fillVacated(ctx, cut.canvas, fill, width, height);
       continue;
     }
 
     const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
-    if (moved) {
+    if (moved && !additive) {
       fillVacated(ctx, cut.canvas, fill, width, height);
     }
 
@@ -648,6 +845,8 @@ function maskUrl(pixels: Uint8Array, width: number, height: number) {
  * (e.g. right-chair box spanning most of the frame).
  */
 export async function tightenSegment(object: SegmentObject): Promise<SegmentObject> {
+  // Pre-baked add-ons keep their colored layer + mask as saved.
+  if (object.suggested || object.layer) return object;
   const mask = await loadImage(object.mask);
   const width = mask.naturalWidth;
   const height = mask.naturalHeight;
@@ -665,12 +864,11 @@ export async function tightenSegment(object: SegmentObject): Promise<SegmentObje
   if (blob.area < 80) return object;
   const fill = blob.area / Math.max(1, object.box.w * object.box.h * width * height);
   // Already tight enough.
-  if (fill > 0.2) return { ...object, box: boxOf(blob.pixels, width, height), layer: undefined };
+  if (fill > 0.2) return { ...object, box: boxOf(blob.pixels, width, height) };
   return {
     ...object,
     mask: maskUrl(blob.pixels, width, height),
     box: boxOf(blob.pixels, width, height),
-    layer: undefined,
   };
 }
 

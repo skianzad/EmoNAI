@@ -49,22 +49,28 @@ async function nanoBananaMap(image: string, mime: string, prompt: string) {
   const apiKey = key("GEMINI_API_KEY");
   if (!apiKey) throw new Error("No key for Nano Banana");
   const model = key("GEMINI_IMAGE_MODEL") || "gemini-3.1-flash-image";
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: image } }],
-          },
-        ],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-      }),
-      signal: AbortSignal.timeout(120_000),
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: image } }],
+            },
+          ],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      }
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "network error";
+    throw new Error(`Nano Banana unreachable (${detail}). Try again in a moment.`);
+  }
   const textBody = await response.text();
   if (!response.ok) throw new Error(`Nano Banana ${response.status}: ${textBody.slice(0, 240)}`);
   const body = JSON.parse(textBody);

@@ -42,18 +42,24 @@ export async function saveRoomBackground(background: string) {
   return saveSegments("room", [], background);
 }
 
-/** Fresh edit state for loaded base room masks. */
+/** Fresh edit state for loaded base room masks. Suggested extras stay hidden until Add. */
 export function resetRoomEdits(objects: SegmentObject[]): SegmentObject[] {
-  return objects.map((object) => ({
-    ...object,
-    tint: null,
-    shade: 0,
-    scale: 100,
-    hidden: false,
-    dx: 0,
-    dy: 0,
-    cover: undefined,
-    blur: undefined,
-    layer: undefined,
-  }));
+  return objects.map((object) => {
+    const suggested = Boolean(object.suggested);
+    return {
+      ...object,
+      tint: null,
+      shade: 0,
+      scale: 100,
+      // Suggested segments (e.g. curtain) stay hidden until the Add chip reveals them.
+      hidden: suggested,
+      suggested,
+      dx: 0,
+      dy: 0,
+      cover: undefined,
+      blur: undefined,
+      // Keep pre-baked layers (curtain PNG) so Add is local, not Nano Banana.
+      layer: object.layer,
+    };
+  });
 }

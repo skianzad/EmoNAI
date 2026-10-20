@@ -28,6 +28,11 @@ function backgroundFile(kind: string) {
   return path.join(process.cwd(), "data", folder, "background.jpg");
 }
 
+function roomLayerFile(id: string) {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(process.cwd(), "data", "room-scene", "layers", `${safe}.png`);
+}
+
 function parseDataUrl(value: string) {
   const match = /^data:([^;]+);base64,([\s\S]+)$/.exec(value);
   if (!match) return null;
@@ -59,7 +64,8 @@ function asBaseObjects(listed: Array<Record<string, unknown>>) {
     next.dx = 0;
     next.dy = 0;
     next.scale = 100;
-    next.hidden = false;
+    // Suggested extras (e.g. cushion) stay hidden until Add reveals them.
+    next.hidden = Boolean(next.suggested);
     delete next.cover;
     delete next.blur;
     return next;
@@ -76,7 +82,16 @@ export async function GET(request: Request) {
         const text = await fs.readFile(roomSegmentsFile(), "utf8");
         const saved = JSON.parse(text) as { objects?: Array<Record<string, unknown>> };
         const listed = Array.isArray(saved.objects) ? saved.objects : [];
-        return NextResponse.json({ objects: asBaseObjects(listed), background });
+        const objects = await Promise.all(
+          asBaseObjects(listed).map(async (object) => {
+            const id = typeof object.id === "string" ? object.id : "";
+            const layer = id ? await readDataUrl(roomLayerFile(id), "image/png") : "";
+            if (layer) object.layer = layer;
+            else delete object.layer;
+            return object;
+          })
+        );
+        return NextResponse.json({ objects, background });
       } catch {
         return NextResponse.json({ objects: [], background });
       }
@@ -122,18 +137,36 @@ export async function POST(request: Request) {
   }
 
   if (kind === "room") {
-    // Keep the pushed base segments forever. Only create the file if missing.
-    if (usable.length > 0 && !(await exists(roomSegmentsFile()))) {
-      const metaObjects = asBaseObjects(usable as Array<Record<string, unknown>>);
+    // Base masks only (no session edits). Create or merge new named segments (e.g. cushion).
+    if (usable.length > 0) {
       await fs.mkdir(path.dirname(roomSegmentsFile()), { recursive: true });
-      await fs.writeFile(roomSegmentsFile(), JSON.stringify({ objects: metaObjects }));
+      const incoming = asBaseObjects(usable as Array<Record<string, unknown>>);
+      let merged = incoming;
+      if (await exists(roomSegmentsFile())) {
+        try {
+          const prior = JSON.parse(await fs.readFile(roomSegmentsFile(), "utf8")) as {
+            objects?: Array<Record<string, unknown>>;
+          };
+          const existing = Array.isArray(prior.objects) ? asBaseObjects(prior.objects) : [];
+          const byName = new Map(
+            existing.map((object) => [String(object.name || "").toLowerCase(), object] as const)
+          );
+          for (const object of incoming) {
+            byName.set(String(object.name || "").toLowerCase(), object);
+          }
+          merged = [...byName.values()];
+        } catch {
+          merged = incoming;
+        }
+      }
+      await fs.writeFile(roomSegmentsFile(), JSON.stringify({ objects: merged }));
     }
     const hasBg = await exists(backgroundFile("room"));
     const hasSeg = await exists(roomSegmentsFile());
     if (!hasBg && !hasSeg && !background.startsWith("data:") && usable.length === 0) {
       return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
     }
-    return NextResponse.json({ ok: true, count: hasSeg ? 1 : 0, background: hasBg });
+    return NextResponse.json({ ok: true, count: hasSeg ? usable.length : 0, background: hasBg });
   }
 
   if (usable.length === 0) {

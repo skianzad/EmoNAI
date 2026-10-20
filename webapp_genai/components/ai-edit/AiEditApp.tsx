@@ -7,12 +7,16 @@ import { callEditor } from "@/lib/callEditor";
 import { loadSegments, resetRoomEdits, saveRoomBackground, saveSegments } from "@/lib/faceSegments";
 import {
   fitEdited,
+  generateColorVariants,
   generateEmptyBackground,
   isBackdrop,
+  isFurnitureRecolor,
+  pickVariantColors,
   renderLocal,
   segmentPhoto,
   segmentsFromIslands,
   tightenSegments,
+  VARIANT_SHADES,
   type SegmentObject,
 } from "@/lib/localEdit";
 import { fitImage, readDataUrl } from "@/lib/shrink";
@@ -136,7 +140,6 @@ const SHADES = [
   { label: "Deeper", zh: "更深", value: -1 },
   { label: "As picked", zh: "原色", value: 0 },
   { label: "Lighter", zh: "更浅", value: 1 },
-  { label: "Lightest", zh: "最浅", value: 2 },
 ];
 
 function shadeColor(hex: string, shade: number) {
@@ -236,7 +239,7 @@ export function AiEditApp() {
   const [light, setLight] = useState("Even");
   const drag = useRef<{ id: string; face: boolean; mode: "move" | "resize"; x: number; y: number; dx: number; dy: number; scale: number; base: SegmentObject[]; latest: SegmentObject[] } | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
-  const promptRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const maskBits = useRef(new Map<string, { width: number; height: number; alpha: Uint8ClampedArray }>());
@@ -298,6 +301,43 @@ export function AiEditApp() {
       cancel = true;
     };
   }, [mode, working, objects, warmth, source, fillTick]);
+
+  /** Append edit / suggestion lines to the prompt (deduped, latest at the bottom). */
+  function appendPromptLines(...incoming: string[]) {
+    const additions = incoming.map((line) => line.trim()).filter(Boolean);
+    if (!additions.length) return;
+    setPrompt((prev) => {
+      const existing = prev.split("\n").map((line) => line.trim()).filter(Boolean);
+      const next = [...existing];
+      for (const line of additions) {
+        if (!next.includes(line)) next.push(line);
+      }
+      return next.join("\n");
+    });
+    requestAnimationFrame(() => {
+      const field = promptRef.current;
+      if (field) field.scrollTop = field.scrollHeight;
+    });
+  }
+
+  // Manual recolor / move / scale land in the prompt. Suggestion chips (Del / Add / All)
+  // stay local — they never push lines meant for Nano Banana.
+  useEffect(() => {
+    if (mode === "photo" || mode === "review" || mode === "voice" || busy) return;
+    const items = mode === "retouch" ? (faceLive.current.length ? faceLive.current : faceObjects) : objects;
+    const nextLight = mode === "retouch" ? light : undefined;
+    const lines = editLines(
+      items.filter((object) => {
+        if (object.hidden || object.suggested) return false;
+        // Baked sofa/chair packs are local switches — don't re-queue for Nano Banana.
+        if (object.variants?.length && object.cover === 0) return false;
+        return true;
+      }),
+      0,
+      nextLight
+    );
+    appendPromptLines(...lines);
+  }, [mode, objects, faceObjects, light, eyes, lines, blur, busy]);
 
   useEffect(() => {
     if (faceObjects.length === 0) return;
@@ -554,25 +594,65 @@ export function AiEditApp() {
     cache.current.set(source, structuredClone(next));
   }
 
+  async function revealAdded(segment: SegmentObject, label: string) {
+    const present = objects.some((object) => object.id === segment.id);
+    const next = present
+      ? objects.map((object) => (object.id === segment.id ? { ...object, hidden: false, suggested: true } : object))
+      : [...objects, { ...segment, hidden: false, suggested: true }];
+    keepRoom(next);
+    snapshot(next, warmth, `Added ${label}`, "New segment");
+    setSelected(segment.id);
+    setMode("object");
+  }
+
   async function addRegion(name: string) {
-    const kept = objects.filter((object) => !object.hidden);
     const label = name.trim();
     if (!label || busy) return;
+
+    // 1) Already in session with a colored layer — just reveal.
+    const existing = objects.find((object) => object.name.toLowerCase() === label.toLowerCase());
+    if (existing?.layer) {
+      await revealAdded(existing, label);
+      return;
+    }
+
     setBusy(true);
     setError("");
     try {
-      const found = await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects", [{ name: label, left: 0.2, top: 0.2, width: 0.6, height: 0.6 }]);
-      const added = pickAdded(kept, found, label);
+      // 2) Load the pre-baked suggestion (mask + colored layer) from disk.
+      if (source === SCENE) {
+        const disk = await loadSegments("room");
+        const saved = disk?.objects?.find((object) => object.name.toLowerCase() === label.toLowerCase());
+        if (saved?.layer || saved?.mask) {
+          const [ready] = resetRoomEdits([saved]);
+          await revealAdded({ ...ready, hidden: false, layer: ready.layer || saved.layer }, label);
+          return;
+        }
+      }
+
+      // 3) Last resort: segment once, then save for next time.
+      const guide = { name: label, left: 0.34, top: 0.52, width: 0.28, height: 0.18 };
+      const found = await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects", [guide]);
+      const added = pickAdded(
+        objects.filter((object) => !object.hidden),
+        found,
+        label
+      );
       if (!added.length) {
-        setError(`Could not find ${label}`);
+        setError(tx(`Could not add ${label}. Try again.`, `无法添加${objectName(label, true)}，请重试。`));
         return;
       }
-      const next = [...kept, ...added];
-      keepRoom(next);
-      snapshot(next, warmth, `Added ${label}`, "New segment");
-      setPrompt("");
+      if (source === SCENE) {
+        await saveSegments(
+          "room",
+          [{ ...added[0], suggested: true, hidden: true } as SegmentObject & { suggested?: boolean }],
+          bgCache.current.get(source)
+        );
+      }
+      await revealAdded(added[0], label);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not add that segment");
+      const message = reason instanceof Error ? reason.message : "Could not add that segment";
+      setError(message === "fetch failed" ? "Could not reach the editor. Try Add again." : message);
     } finally {
       setBusy(false);
     }
@@ -591,6 +671,49 @@ export function AiEditApp() {
     setMode("voice");
     try {
       const preview = await renderLocal(kind === "face" ? base : workingRef.current || base, items, nextWarmth);
+
+      // Sofa / chair recolor: one contact-sheet generation → 3 colors × 4 shades to switch locally.
+      const furniture = items.filter(
+        (object) =>
+          !object.hidden &&
+          object.tint &&
+          isFurnitureRecolor(object.name) &&
+          changes.some((line) => line.toLowerCase().includes(object.name.toLowerCase()))
+      );
+      if (kind !== "face" && furniture.length === 1 && changes.length === 1) {
+        const target = furniture[0];
+        const colors = pickVariantColors(target.tint!, PALETTES.ai);
+        const shades = [...VARIANT_SHADES];
+        const clean = items.map((object) =>
+          object.id === target.id ? { ...object, tint: null, shade: 0, cover: undefined, layer: object.baseLayer || object.layer } : object
+        );
+        const sheetBase = await renderLocal(workingRef.current || base, clean, nextWarmth);
+        const variants = await generateColorVariants(editorFor("heavy"), sheetBase, target, colors, shades, shadeColor);
+        if (!variants.length) throw new Error(tx("Could not build color options.", "无法生成颜色选项。"));
+        const picked =
+          variants.find((item) => item.hex.toLowerCase() === target.tint!.toLowerCase() && item.shade === (target.shade || 0)) ||
+          variants.find((item) => item.hex.toLowerCase() === target.tint!.toLowerCase()) ||
+          variants[0];
+        const next = items.map((object) =>
+          object.id === target.id
+            ? {
+                ...object,
+                baseLayer: object.baseLayer || object.layer,
+                variants,
+                layer: picked.layer,
+                tint: picked.hex,
+                shade: picked.shade,
+                cover: 0,
+              }
+            : object
+        );
+        snapshot(next, nextWarmth, tx(`Color options for ${target.name}`, `${objectName(target.name, true)}的颜色选项`), request);
+        cache.current.set(base, structuredClone(next));
+        setSelected(target.id);
+        setMode("object");
+        return;
+      }
+
       const unchanged = items
         .filter((object) => !object.hidden && !changes.some((line) => line.toLowerCase().includes(object.name.toLowerCase())))
         .map((object) => object.name);
@@ -669,6 +792,24 @@ export function AiEditApp() {
     const next = objects.map((object) => (object.id === id ? { ...object, ...change } : object));
     if (label) snapshot(next, warmth, label, next.find((object) => object.id === id)?.name ?? "Edit");
     else setObjects(next);
+  }
+
+  /** Prefer a baked AI variant when present; otherwise local tint overlay. */
+  function applyObjectColor(id: string, hex: string | null, shade: number, label: string) {
+    const object = objects.find((item) => item.id === id);
+    if (!object) return;
+    if (!hex) {
+      patch(id, { tint: null, shade: 0, layer: object.baseLayer || object.layer, cover: undefined }, label);
+      return;
+    }
+    const baked = object.variants?.find(
+      (item) => item.hex.toLowerCase() === hex.toLowerCase() && item.shade === shade
+    );
+    if (baked) {
+      patch(id, { tint: hex, shade, layer: baked.layer, cover: 0 }, label);
+      return;
+    }
+    patch(id, { tint: hex, shade, cover: object.variants ? 0.35 : undefined }, label);
   }
 
   function useStep(index: number, list = steps) {
@@ -1090,7 +1231,6 @@ export function AiEditApp() {
 
   const dateLabel = new Date().toLocaleDateString(zh ? "zh-CN" : "en-US", { month: "long", day: "numeric" });
   const canUndo = (faceOn ? faceAt : at) > 0;
-  const canRegen = editLines(faceOn ? faceObjects : objects, faceOn ? 0 : warmth, faceOn ? light : undefined).length > 0;
   const requestText = busy ? said || tx("Generating a new photo.", "正在生成新照片。") : voiceDraft;
 
   function leaveEdit() {
@@ -1261,20 +1401,6 @@ export function AiEditApp() {
           {editing ? (
             <div className="ae-photo-actions">
               <span className="ae-badge">{hold ? tx("Original", "原图") : tx("Preview", "效果预览")}</span>
-              <button type="button" className="ae-regen" aria-label={tx("Regenerate", "重新生成")} disabled={!canRegen || busy} onClick={() => {
-                const lines = editLines(faceOn ? (faceLive.current.length ? faceLive.current : faceObjects) : objects, faceOn ? 0 : warmth, faceOn ? light : undefined);
-                if (!lines.length) return;
-                setVoiceDraft("");
-                setPrompt(lines.join(" "));
-                promptRef.current?.focus();
-              }}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 12a9 9 0 0 0-15-6.7L3 8" />
-                  <path d="M3 3v5h5" />
-                  <path d="M3 12a9 9 0 0 0 15 6.7L21 16" />
-                  <path d="M21 21v-5h-5" />
-                </svg>
-              </button>
             </div>
           ) : null}
           <img
@@ -1452,12 +1578,18 @@ export function AiEditApp() {
               <div className="ae-object-options">
                 <p className="ae-option-title"><span>{tx("Change color", "修改颜色")}</span></p>
                 <div className="ae-option-row ae-colors">
-                  <button type="button" aria-label={tx("Original", "原色")} className={!current.tint ? "ae-color original on" : "ae-color original"} onClick={() => patch(current.id, { tint: null, shade: 0 }, tx(`${current.name} · original color`, `${objectName(current.name, true)} · 原色`))} />
-                  {PALETTES[palette].slice(0, 3).map((swatch) => (
-                    <button key={swatch.hex} type="button" aria-label={objectName(swatch.name, zh)} className={current.tint === swatch.hex ? "ae-color on" : "ae-color"} style={{ background: swatch.hex }} onClick={() => patch(current.id, { tint: swatch.hex, shade: 0 }, tx(`${current.name} · ${swatch.name}`, `${objectName(current.name, true)} · ${swatch.name}`))} />
+                  <button type="button" aria-label={tx("Original", "原色")} className={!current.tint ? "ae-color original on" : "ae-color original"} onClick={() => applyObjectColor(current.id, null, 0, tx(`${current.name} · original color`, `${objectName(current.name, true)} · 原色`))} />
+                  {(current.variants?.length
+                    ? [...new Map(current.variants.map((item) => [item.hex.toLowerCase(), item.hex])).values()].map((hex) => {
+                        const named = PALETTES[palette].find((swatch) => swatch.hex.toLowerCase() === hex.toLowerCase());
+                        return { name: named?.name || hex, hex };
+                      })
+                    : PALETTES[palette].slice(0, 3)
+                  ).map((swatch) => (
+                    <button key={swatch.hex} type="button" aria-label={objectName(swatch.name, zh)} className={current.tint === swatch.hex ? "ae-color on" : "ae-color"} style={{ background: swatch.hex }} onClick={() => applyObjectColor(current.id, swatch.hex, 0, tx(`${current.name} · ${swatch.name}`, `${objectName(current.name, true)} · ${swatch.name}`))} />
                   ))}
                   <label className="ae-color rainbow" aria-label={tx("More colors", "更多颜色")}>
-                    <input type="color" value={current.tint || "#c46a4a"} onChange={(event) => patch(current.id, { tint: event.target.value, shade: 0 }, tx(`${current.name} recolored`, `${objectName(current.name, true)}改色`))} />
+                    <input type="color" value={current.tint || "#c46a4a"} onChange={(event) => applyObjectColor(current.id, event.target.value, 0, tx(`${current.name} recolored`, `${objectName(current.name, true)}改色`))} />
                   </label>
                 </div>
                 <div className="ae-option-row ae-shades">
@@ -1470,7 +1602,7 @@ export function AiEditApp() {
                         aria-label={zh ? shade.zh : shade.label}
                         className={current.tint && current.shade === shade.value ? "ae-color on" : "ae-color"}
                         style={{ background: shadeColor(base, shade.value) }}
-                        onClick={() => patch(current.id, { tint: base, shade: shade.value }, tx(`${current.name} · ${shade.label}`, `${objectName(current.name, true)} · ${shade.zh}`))}
+                        onClick={() => applyObjectColor(current.id, base, shade.value, tx(`${current.name} · ${shade.label}`, `${objectName(current.name, true)} · ${shade.zh}`))}
                       />
                     );
                   })}
@@ -1507,18 +1639,39 @@ export function AiEditApp() {
               <p className="ae-recommend">{tx("Suggestions", "推荐")}</p>
               {error ? <p className="ae-error">{error}</p> : null}
               {removeTargets.length ? (
-                <button type="button" className="ae-chip" disabled={busy} onClick={() => void deleteFromPhoto(removeTargets, false)}>
+                <button
+                  type="button"
+                  className="ae-chip"
+                  disabled={busy}
+                  onClick={() => {
+                    void deleteFromPhoto(removeTargets, false);
+                  }}
+                >
                   <span>{tx("Del", "删")}</span>
                   {tx(`Remove ${removeTargets.map((object) => object.name).join(", ")}`, `去掉${removeTargets.map((object) => objectName(object.name, true)).join("、")}`)}
                 </button>
               ) : null}
               {addIdea ? (
-                <button type="button" className="ae-chip" disabled={busy} onClick={() => void addRegion(prompt.trim() || addIdea)}>
+                <button
+                  type="button"
+                  className="ae-chip"
+                  disabled={busy}
+                  onClick={() => {
+                    void addRegion(addIdea);
+                  }}
+                >
                   <span>{tx("Add", "增")}</span>
                   {tx(`Add the ${addIdea}`, `加上${objectName(addIdea, true)}`)}
                 </button>
               ) : null}
-              <button type="button" className="ae-chip" disabled={busy} onClick={() => snapshot(objects, warmth > 0.2 ? 0 : allIdea.warmth, allIdea.label, tx("Whole photo", "整体"))}>
+              <button
+                type="button"
+                className="ae-chip"
+                disabled={busy}
+                onClick={() => {
+                  snapshot(objects, warmth > 0.2 ? 0 : allIdea.warmth, allIdea.label, tx("Whole photo", "整体"));
+                }}
+              >
                 <span>{tx("All", "整体")}</span>
                 {allIdea.label}
               </button>
@@ -1538,16 +1691,17 @@ export function AiEditApp() {
               <button type="button" className={listening ? "ae-voice recording" : "ae-voice"} aria-label={tx("Voice input", "语音输入")} onClick={onVoice}>
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M9 22h6" /></svg>
               </button>
-              <input
+              <textarea
                 ref={promptRef}
                 className="ae-prompt"
                 value={prompt}
                 disabled={busy}
+                rows={Math.min(6, Math.max(1, prompt.split("\n").length))}
                 placeholder={listening ? tx("Listening…", "正在听…") : tx("Describe the edit", "描述要修改的内容")}
                 aria-label={tx("Edit prompt", "编辑提示")}
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     submitEdit();
                   }
@@ -1642,9 +1796,13 @@ function colorName(hex: string) {
 
 function suggestEdits(items: SegmentObject[]) {
   const visible = items.filter((object) => !object.hidden && !/background|backdrop|wall|floor|ceiling|sky/i.test(object.name));
+  const allNames = items.map((object) => object.name.toLowerCase()).join(" | ");
   const joined = visible.map((object) => object.name.toLowerCase()).join(" | ");
   const has = (pattern: RegExp) => pattern.test(joined);
+  const hasSaved = (pattern: RegExp) => pattern.test(allNames);
   const missing = (pattern: RegExp) => !has(pattern);
+  // Prefer suggesting a saved-but-hidden extra (curtain) before inventing a new add.
+  const savedAdd = items.find((object) => object.hidden && object.suggested);
 
   const rank = (name: string) => {
     if (/phone|bag|cup|bottle|remote|cable|trash/i.test(name)) return 4;
@@ -1659,8 +1817,10 @@ function suggestEdits(items: SegmentObject[]) {
     .slice(0, 2);
 
   const addChoices: { when: boolean; name: string }[] = [
-    { when: has(/sofa|couch|chair/) && missing(/plant|flower/), name: "plant" },
-    { when: has(/sofa|couch|chair/) && missing(/cushion|pillow/), name: "cushion" },
+    { when: Boolean(savedAdd), name: savedAdd?.name ?? "" },
+    { when: has(/sofa|couch|chair/) && missing(/plant|flower/) && !hasSaved(/plant|flower/), name: "plant" },
+    // Curtains by the window — sofa already has a blanket, so don't suggest cushion.
+    { when: has(/sofa|couch|window|lamp/) && missing(/curtain|drape/) && !hasSaved(/curtain|drape/), name: "curtain" },
     { when: has(/sofa|couch|chair|table/) && missing(/rug|carpet/), name: "rug" },
     { when: missing(/lamp|light/), name: "floor lamp" },
     { when: has(/wall|sofa|chair/) && missing(/paint|art|picture|frame/), name: "painting" },
@@ -1668,7 +1828,7 @@ function suggestEdits(items: SegmentObject[]) {
     { when: has(/table/) && missing(/vase|flower/), name: "vase" },
     { when: missing(/table/), name: "side table" },
   ];
-  const add = addChoices.find((choice) => choice.when)?.name ?? "";
+  const add = addChoices.find((choice) => choice.when && choice.name)?.name ?? "";
 
   const all = has(/plant|window|daylight/)
     ? { en: "Make the room feel brighter and airier", zh: "让房间更明亮通透", warmth: -0.12 }
@@ -1718,9 +1878,27 @@ function overlapScore(a: { left: number; top: number; width: number; height: num
 }
 
 function pickAdded(kept: SegmentObject[], found: SegmentObject[], name: string) {
-  const unused = found.filter((object) => !kept.some((prior) => prior.name.toLowerCase() === object.name.toLowerCase() || overlapScore(boxFrame(prior), object.box) > 0.45));
+  const want = name.trim().toLowerCase();
+  // Prefer an exact name match from color-map — do not reject for sofa overlap.
+  const named = found
+    .filter((object) => object.name.toLowerCase() === want)
+    .sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h);
+  if (named.length) {
+    return [{ ...named[0], name }];
+  }
+  const unused = found.filter(
+    (object) =>
+      !kept.some(
+        (prior) =>
+          prior.name.toLowerCase() === object.name.toLowerCase() ||
+          overlapScore(boxFrame(prior), object.box) > 0.45
+      )
+  );
   const chosen = unused.length ? [unused.sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h)[0]] : [];
-  return chosen.map((object) => ({ ...object, name: object.name === "Object" || object.name === "Region" ? name : object.name }));
+  return chosen.map((object) => ({
+    ...object,
+    name: object.name === "Object" || object.name === "Region" ? name : object.name,
+  }));
 }
 
 function boxFrame(object: SegmentObject) {
