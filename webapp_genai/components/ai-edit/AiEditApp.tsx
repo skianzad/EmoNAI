@@ -45,7 +45,7 @@ function editStyle(items: SegmentObject[]): "room" | "face" {
 
 type Mode = "photo" | "home" | "object" | "voice" | "review" | "history" | "cleanup" | "retouch";
 type ChangeIsland = Island & { on: boolean };
-type ChangeSet = { before: string; edited: string; islands: ChangeIsland[] };
+type ChangeSet = { before: string; edited: string; islands: ChangeIsland[]; pending?: SegmentObject[] };
 
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -56,7 +56,12 @@ function loadImage(src: string) {
   });
 }
 
-async function composeChanges(pack: ChangeSet, tintOn: boolean) {
+/**
+ * Review overlay: paste each island from the edited photo onto the base.
+ * Do NOT empty-bg punch here — soft/oversized island masks leave rug/floor blotches
+ * on top of the new furniture (punch is only for real remove/move in renderLocal).
+ */
+async function composeChanges(pack: ChangeSet, tintOn: boolean, _fillSrc?: string | null) {
   const [base, edited, ...masks] = await Promise.all([
     loadImage(pack.before),
     loadImage(pack.edited),
@@ -254,9 +259,20 @@ export function AiEditApp() {
   const tx = (en: string, cn: string) => (zh ? cn : en);
 
   const editing = mode !== "photo";
-  const current = objects.find((object) => object.id === selected && !isBackdrop(object.name)) ?? null;
-  // Background / backdrop segments are never selectable or boxed.
+  // Hidden / removed segments are never the active edit target.
+  const current =
+    objects.find((object) => object.id === selected && !object.hidden && !isBackdrop(object.name)) ?? null;
+  // Background / backdrop / removed segments are never selectable or boxed.
   const visible = objects.filter((object) => !object.hidden && !isBackdrop(object.name));
+
+  // If the selected segment was removed, drop selection so it can't keep being edited.
+  useEffect(() => {
+    if (!selected) return;
+    const stillThere = objects.some((object) => object.id === selected && !object.hidden && !isBackdrop(object.name));
+    if (stillThere) return;
+    setSelected(null);
+    if (mode === "object") setMode("home");
+  }, [objects, selected, mode]);
 
   useEffect(() => {
     loadSegments("face")
@@ -289,7 +305,6 @@ export function AiEditApp() {
   useEffect(() => {
     if (mode === "photo" || mode === "retouch" || mode === "review" || mode === "voice" || objects.length === 0) return;
     let cancel = false;
-    // Present the original working photo; fill vacated masks from the saved empty background.
     renderLocal(working, objects, warmth, bgCache.current.get(source) || null)
       .then((url) => {
         if (!cancel) setView(url);
@@ -658,6 +673,61 @@ export function AiEditApp() {
     }
   }
 
+  /**
+   * Add flow: AI returns a full new photo (preview that), assume only the new
+   * section changed, keep every old segment, and lift just that island from the
+   * new photo as an extra layer (empty-bg punch underneath).
+   */
+  async function previewAddFromPhoto(promptText: string, items: SegmentObject[], beforeSrc: string) {
+    const existing = items.filter((object) => !object.hidden && !isBackdrop(object.name)).map((object) => object.name);
+    const guided = [
+      "This is the exact same photograph — keep the identical camera, framing, crop, perspective, and aspect ratio.",
+      "Do not zoom, pan, reframe, or change the viewpoint. Walls, floor, windows, lighting, and shadows stay the same.",
+      existing.length ? `Keep these existing objects unchanged: ${existing.join(", ")}.` : "",
+      `Only apply this edit: ${promptText}`,
+      "Change only the new section needed for that edit; leave every other pixel looking like the original photo.",
+      "Return the edited photograph at the same size and framing.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const image = await callEditor(editorFor("lite"), guided, beforeSrc);
+    const split = await splitIslands(beforeSrc, image);
+    const biggest = pickBiggestIsland(split.islands);
+    if (!biggest) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
+    // No hints — never rewrite an existing plant/sofa/etc.
+    const [segment] = await segmentsFromIslands(split.edited, [biggest], []);
+    if (!segment?.layer) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
+    const ready: SegmentObject = {
+      ...segment,
+      id: uid(),
+      name: nameFromPrompt(promptText, segment.name),
+      // On approve we keep the AI photo as working — mark baked so we don't punch it away.
+      baked: true,
+      replaced: false,
+      suggested: false,
+      tint: null,
+      shade: 0,
+      cover: undefined,
+      variants: undefined,
+      dx: 0,
+      dy: 0,
+      scale: 100,
+      hidden: false,
+    };
+    const pack: ChangeSet = {
+      before: beforeSrc,
+      edited: split.edited,
+      islands: [{ ...biggest, id: ready.id, label: ready.name, on: true }],
+      pending: [ready],
+    };
+    // Preview the full AI photo; old segments untouched until Accept.
+    setChanges(pack);
+    setView(split.edited);
+    setSelected(ready.id);
+    setMode("review");
+    return ready;
+  }
+
   async function realize(base: string, items: SegmentObject[], nextWarmth: number, kind: "objects" | "face" | "room", light?: string, instruction?: string) {
     const changes = editLines(items, nextWarmth, light);
     const request = (instruction ?? changes.join(" ")).trim();
@@ -714,6 +784,12 @@ export function AiEditApp() {
         return;
       }
 
+      // Add / freeform instruction: preview full new photo, keep old segments, lift only the new island.
+      if (kind !== "face" && (isAddPrompt(request) || !changes.length)) {
+        await previewAddFromPhoto(request, items, preview);
+        return;
+      }
+
       const unchanged = items
         .filter((object) => !object.hidden && !changes.some((line) => line.toLowerCase().includes(object.name.toLowerCase())))
         .map((object) => object.name);
@@ -742,23 +818,37 @@ export function AiEditApp() {
             ],
           }
         : await splitIslands(preview, image);
-      const added = (await segmentsFromIslands(split.edited, split.islands, hinted.length ? hinted : items)).map((segment) => {
-        const { layer: _layer, ...rest } = segment;
-        return rest;
+      // Keep old segments; only refresh hinted ones' layers from the new photo.
+      const refreshed = await segmentsFromIslands(split.edited, split.islands.slice(0, Math.max(hinted.length, 1)), hinted);
+      if (!refreshed.length) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
+      const byHint = new Map<string, SegmentObject>();
+      for (const segment of refreshed) {
+        const hit = hinted.find((object) => object.name.toLowerCase() === segment.name.toLowerCase());
+        if (hit) byHint.set(hit.id, segment);
+      }
+      const next = items.map((object) => {
+        const match = byHint.get(object.id);
+        if (!match) return object;
+        return {
+          ...object,
+          layer: match.layer,
+          mask: match.mask,
+          box: match.box,
+          baseLayer: object.baseLayer || object.layer,
+          replaced: true,
+          tint: null,
+          shade: 0,
+          cover: undefined,
+          variants: undefined,
+        };
       });
-      if (added.length === 0) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
-      const cleared = items.map((object) => {
-        const { layer: _layer, ...rest } = object;
-        return hinted.some((item) => item.id === object.id) ? { ...rest, tint: null, shade: 0, dx: 0, dy: 0, scale: 100, hidden: false } : rest;
-      });
-      const next = [...cleared, ...added];
       const pack: ChangeSet = {
         before: preview,
         edited: split.edited,
         islands: split.islands.map((island) => ({
           ...island,
           on: true,
-          label: added.find((segment) => segment.id === island.id)?.name ?? island.label,
+          label: refreshed.find((segment) => segment.id === island.id)?.name ?? island.label,
         })),
       };
       if (kind === "face") {
@@ -766,19 +856,19 @@ export function AiEditApp() {
         setFaceObjects(next);
         setFaceSteps([{ id: uid(), label: tx("Rerun with AI", "重新生成"), meta: request, objects: structuredClone(next), eyes, lines, blur, shown: true }]);
         setFaceAt(0);
-        setFaceSelected(added[0]?.id ?? null);
+        setFaceSelected(refreshed[0]?.id ?? null);
         setMode("retouch");
         return;
       }
-      const baked = await composeChanges({ ...pack, islands: pack.islands.map((island) => ({ ...island, on: true })) }, false);
-      workingRef.current = baked;
-      setWorking(baked);
-      setPhoto(baked);
+      // Preview the full new photo; keep working as the pre-edit base for local re-composite.
+      workingRef.current = preview;
+      setWorking(preview);
+      setPhoto(preview);
       snapshot(next, 0, tx("Rerun with AI", "重新生成"), request);
       cache.current.set(base, structuredClone(next));
-      setSelected(added[0]?.id ?? null);
+      setSelected(hinted[0]?.id ?? null);
       setChanges(pack);
-      setView(await composeChanges(pack, true));
+      setView(split.edited);
       setMode("review");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Edit failed");
@@ -1033,19 +1123,32 @@ export function AiEditApp() {
     }
     if (mode === "review" && changes) {
       const kept = new Set(changes.islands.filter((island) => island.on).map((island) => island.id));
-      const next = objects.filter((object) => !object.layer || kept.has(object.id));
-      setObjects(next);
-      cache.current.set(source, structuredClone(next));
-      const baked = await composeChanges({ ...changes, islands: changes.islands.filter((island) => island.on) }, false);
-      workingRef.current = baked;
-      setWorking(baked);
-      setPhoto(baked);
+      // Old segments stay; append only accepted new layers for selection / later edits.
+      const extras = (changes.pending || []).filter((segment) => kept.has(segment.id));
+      const next = extras.length ? [...objects, ...extras] : objects;
+      // New AI photo is the clean base: drop prior remove-punches so they are not
+      // re-applied on top of it. Punch still works for removes after this.
+      const approved = extras.length ? changes.edited : changes.before;
+      const cleared = extras.length
+        ? next.filter((object) => object.suggested || !object.hidden)
+        : next;
+      workingRef.current = approved;
+      setWorking(approved);
+      setPhoto(approved);
+      keepRoom(cleared);
+      snapshot(
+        cleared,
+        warmth,
+        extras[0]
+          ? tx(`Added ${extras[0].name}`, `已加上${objectName(extras[0].name, true)}`)
+          : tx("Applied edit", "已应用编辑"),
+        extras[0]?.name || "Edit"
+      );
       setChanges(null);
       setView(null);
       setHold(false);
-      setWarmth(0);
-      setSelected(next.find((object) => object.layer)?.id ?? null);
-      setMode("home");
+      setSelected(extras[0]?.id ?? null);
+      setMode(extras[0] ? "object" : "home");
       return;
     }
     if (view) setPhoto(view);
@@ -1061,7 +1164,7 @@ export function AiEditApp() {
       islands: changes.islands.map((island) => (island.id === id ? { ...island, on: !island.on } : island)),
     };
     setChanges(next);
-    setView(await composeChanges(next, true));
+    setView(await composeChanges(next, true, bgCache.current.get(source) || null));
   }
 
   async function send(text: string) {
@@ -1088,32 +1191,28 @@ export function AiEditApp() {
       return;
     }
     const localItems = mode === "retouch" ? (faceLive.current.length ? faceLive.current : faceObjects) : objects;
-    const localLines = editLines(localItems, mode === "retouch" ? 0 : warmth, mode === "retouch" ? light : undefined);
-    if (localLines.length) {
-      const kind = mode === "retouch" ? "face" : segmentKind.current === "face" ? "objects" : segmentKind.current;
-      const base = mode === "retouch" ? faceSource : source;
-      await realize(base, localItems, mode === "retouch" ? 0 : warmth, kind, mode === "retouch" ? light : undefined, trimmed);
+    if (mode === "retouch") {
+      await realize(faceSource, localItems, 0, "face", light, trimmed);
       return;
     }
-    setMode("voice");
+    // Room: preview the full new photo, keep old segments, lift only the new island.
     setBusy(true);
+    setError("");
+    setMode("voice");
     try {
-      const image = await callEditor(editorFor("lite"), trimmed, view || photo);
-      const before = source;
-      const split = await splitIslands(before, image);
-      const pack: ChangeSet = {
-        before,
-        edited: split.edited,
-        islands: split.islands.map((island, index) => ({ ...island, label: `${index + 1}`, on: true })),
-      };
-      setChanges(pack);
-      setView(await composeChanges(pack, true));
-      setMode("review");
+      const before = await renderLocal(
+        workingRef.current || source,
+        localItems,
+        warmth,
+        bgCache.current.get(source) || null
+      );
+      await previewAddFromPhoto(trimmed, localItems, before);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Edit failed");
       setMode("home");
     } finally {
       setBusy(false);
+      setSaid("");
     }
   }
 
@@ -1215,15 +1314,15 @@ export function AiEditApp() {
     if (face) {
       const next = faceLive.current.map((object) => (ids.has(object.id) ? { ...object, hidden: true } : object));
       if (faceSource === PORTRAIT) faceCache.current = structuredClone(next);
-      if (faceSelected && ids.has(faceSelected)) setFaceSelected(next.find((object) => !object.hidden && !/background|backdrop/i.test(object.name))?.id ?? null);
+      if (faceSelected && ids.has(faceSelected)) setFaceSelected(null);
       rememberFace(next, `Deleted ${names.join(", ")}`, "Delete");
       return;
     }
     const next = objects.map((object) => (ids.has(object.id) ? { ...object, hidden: true } : object));
+    // Removed segments must leave selection — otherwise the ghost box stays editable.
     if (selected && ids.has(selected)) {
-      const nextId = next.find((object) => !object.hidden)?.id ?? null;
-      setSelected(nextId);
-      if (!nextId) setMode("home");
+      setSelected(null);
+      setMode("home");
     }
     keepRoom(next);
     snapshot(next, warmth, tx(`Deleted ${names.join(", ")}`, `已去掉${names.map((name) => objectName(name, true)).join("、")}`), tx("Delete", "删除"));
@@ -1469,7 +1568,9 @@ export function AiEditApp() {
         {editing ? (
           <button type="button" className={historyOpen ? "ae-hist-arrow on" : "ae-hist-arrow"} aria-label={tx("History", "历史")} aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d={historyOpen ? "m6 10 6 6 6-6" : "m6 14 6-6 6 6"} />
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M12 7v5l4 2" />
             </svg>
           </button>
         ) : <span />}
@@ -1607,6 +1708,13 @@ export function AiEditApp() {
                     );
                   })}
                 </div>
+                {isFurnitureRecolor(current.name) ? (
+                  <p className="ae-option-hint">
+                    {current.variants?.length
+                      ? tx("Tap any color or shade to switch instantly.", "点颜色或深浅即可切换。")
+                      : tx("Tap a color once to build 3 colors × 4 shades, then switch here.", "先点一次颜色生成 3 色 × 4 深浅，之后在此快速切换。")}
+                  </p>
+                ) : null}
                 {/* Suggested / Warm / Cool tabs hidden — show suggested swatches + picker only.
                 <div className="ae-picks">
                   {(["ai", "warm", "cool"] as Palette[]).map((item) => (
@@ -1837,6 +1945,45 @@ function suggestEdits(items: SegmentObject[]) {
       : { en: "Make the whole photo a little warmer", zh: "让整张照片更温暖一点", warmth: 0.22 };
 
   return { remove, add, all };
+}
+
+/** Prefer a real object-sized island — skip huge whole-frame washes. */
+function pickBiggestIsland(islands: Island[]) {
+  if (!islands.length) return null;
+  const ranked = [...islands].sort((a, b) => (b.area || 0) - (a.area || 0));
+  if (ranked.length >= 2 && (ranked[0].area || 0) > (ranked[1].area || 0) * 2.2) {
+    return ranked[1];
+  }
+  return ranked[0];
+}
+
+function isAddPrompt(prompt: string) {
+  return /\b(add|insert|place|put|include|bring in)\b/i.test(prompt);
+}
+
+function nameFromPrompt(prompt: string, fallback: string) {
+  const lower = prompt.toLowerCase();
+  const names = [
+    "curtain",
+    "sofa",
+    "couch",
+    "armchair",
+    "chair",
+    "lamp",
+    "rug",
+    "carpet",
+    "plant",
+    "table",
+    "cushion",
+    "pillow",
+    "painting",
+    "bookshelf",
+  ];
+  for (const name of names) {
+    if (lower.includes(name)) return name === "couch" ? "sofa" : name;
+  }
+  const clipped = prompt.trim().replace(/^["“]|["”]$/g, "");
+  return clipped.length <= 28 ? clipped || fallback : fallback;
 }
 
 function editLines(items: SegmentObject[], warmth: number, light?: string) {

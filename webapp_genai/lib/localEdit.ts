@@ -45,6 +45,13 @@ export type SegmentObject = {
   blur?: number;
   /** Pre-baked add-on (e.g. curtain). Not in the original photo; hide = skip draw. */
   suggested?: boolean;
+  /** AI-replaced object: clear old footprint with empty bg, then draw `layer` on top. */
+  replaced?: boolean;
+  /**
+   * Layer is already in the working photo (approved AI add). Skip redraw until the
+   * user moves / recolors / hides it — otherwise empty-bg punch wipes the object.
+   */
+  baked?: boolean;
 };
 
 /** Shade steps used in the sofa/chair color pack (4 shades). */
@@ -429,9 +436,9 @@ export type PrepareProgress = (message: string) => void;
  * and inpaint a clean empty room. One edit call — no per-object passes.
  */
 /**
- * One Nano Banana call → 3×4 contact sheet of the same photo with only `object`
- * recolored. Cells are sliced into masked layers so the UI can switch instantly.
- * Layout: columns = colors (left→right), rows = shades (dark→light, top→bottom).
+ * Bake 3 colors × N shades for sofa/chair switching.
+ * Uses 3 soft single-color edits (contact sheets often hit IMAGE_RECITATION),
+ * then derives shade steps locally from each color layer.
  */
 export async function generateColorVariants(
   editorId: string,
@@ -441,91 +448,86 @@ export async function generateColorVariants(
   shades: number[],
   toShade: (hex: string, shade: number) => string
 ): Promise<ColorVariant[]> {
-  const cols = Math.min(3, colors.length);
-  const rows = Math.min(4, shades.length);
-  if (cols < 1 || rows < 1) return [];
+  const picks = colors.slice(0, 3);
+  const shadeSteps = shades.slice(0, 4);
+  if (!picks.length || !shadeSteps.length) return [];
 
-  const legend: string[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const hex = toShade(colors[col], shades[row]).toUpperCase();
-      legend.push(`row ${row + 1} col ${col + 1}: ${object.name} in ${hex}`);
-    }
-  }
-
-  const prompt = [
-    `Create a clean ${cols} by ${rows} contact sheet of THIS exact photograph.`,
-    `Columns (left to right) are ${cols} upholstery colors; rows (top to bottom) are ${rows} shade steps from darkest to lightest.`,
-    `Each cell must be the full original photo with ONLY the ${object.name} recolored photorealistically. Do not invent objects or change the room, camera, lighting, or other furniture.`,
-    `No text labels, no thick borders. Equal cell sizes, thin light gutters only.`,
-    `Cell colors: ${legend.join("; ")}.`,
-  ].join(" ");
-
-  const sheet = await callEditor(editorId, prompt, photoSrc);
-  const cells = await sliceContactSheet(sheet, cols, rows);
   const photo = await loadImage(photoSrc);
   const width = photo.naturalWidth;
   const height = photo.naturalHeight;
   const variants: ColorVariant[] = [];
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const cell = cells[row * cols + col];
-      if (!cell) continue;
-      const layer = await layerFromCell(cell, object.mask, width, height);
-      if (!layer) continue;
-      variants.push({ hex: colors[col], shade: shades[row], layer });
+  for (const hex of picks) {
+    const target = toShade(hex, 0).toUpperCase();
+    const prompt = [
+      `Edit this living-room photo: recolor only the ${object.name} to ${target}.`,
+      "Keep the room layout, camera, lighting, and other furniture looking natural.",
+      "Return the edited photograph.",
+    ].join(" ");
+    const edited = await callEditor(editorId, prompt, photoSrc);
+    const baseLayer = await layerFromEdited(edited, object.mask, width, height);
+    if (!baseLayer) continue;
+    for (const shade of shadeSteps) {
+      const layer = shade === 0 ? baseLayer : await shadeLayer(baseLayer, shade);
+      variants.push({ hex, shade, layer });
     }
   }
   return variants;
 }
 
-async function sliceContactSheet(sheetSrc: string, cols: number, rows: number) {
-  const sheet = await loadImage(sheetSrc);
-  const cellW = sheet.naturalWidth / cols;
-  const cellH = sheet.naturalHeight / rows;
-  const insetX = cellW * 0.03;
-  const insetY = cellH * 0.03;
-  const cells: string[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(cellW - insetX * 2));
-      canvas.height = Math.max(1, Math.round(cellH - insetY * 2));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        cells.push("");
-        continue;
-      }
-      ctx.drawImage(
-        sheet,
-        col * cellW + insetX,
-        row * cellH + insetY,
-        cellW - insetX * 2,
-        cellH - insetY * 2,
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      );
-      cells.push(canvas.toDataURL("image/jpeg", 0.92));
-    }
-  }
-  return cells;
+/** Combine two alpha masks so fill clears both the old object and the new edit. */
+export async function unionMasks(a: string, b: string) {
+  const [first, second] = await Promise.all([loadImage(a), loadImage(b)]);
+  const width = Math.max(first.naturalWidth, second.naturalWidth);
+  const height = Math.max(first.naturalHeight, second.naturalHeight);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return a;
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(first, 0, 0, width, height);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.drawImage(second, 0, 0, width, height);
+  return canvas.toDataURL("image/png");
 }
 
-async function layerFromCell(cellSrc: string, maskSrc: string, width: number, height: number) {
-  if (!cellSrc) return "";
-  const cell = await loadImage(cellSrc);
+async function layerFromEdited(editedSrc: string, maskSrc: string, width: number, height: number) {
+  const edited = await loadImage(editedSrc);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
-  ctx.drawImage(cell, 0, 0, width, height);
+  ctx.drawImage(edited, 0, 0, width, height);
   ctx.globalCompositeOperation = "destination-in";
-  const mask = await loadImage(maskSrc);
-  ctx.drawImage(mask, 0, 0, width, height);
+  ctx.drawImage(await loadImage(maskSrc), 0, 0, width, height);
+  return canvas.toDataURL("image/png");
+}
+
+/** Darken / lighten opaque pixels of a masked layer for shade swatches. */
+async function shadeLayer(layerSrc: string, shade: number) {
+  const image = await loadImage(layerSrc);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return layerSrc;
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  const amount = shade > 0 ? shade * 0.14 : shade * 0.16;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 8) continue;
+    for (let c = 0; c < 3; c += 1) {
+      const channel = data[i + c];
+      data[i + c] =
+        amount > 0
+          ? Math.min(255, Math.round(channel + (255 - channel) * amount))
+          : Math.max(0, Math.round(channel * (1 + amount)));
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
   return canvas.toDataURL("image/png");
 }
 
@@ -541,7 +543,7 @@ export async function generateEmptyBackground(editorId: string, originalSrc: str
     named.length ? `Segment names: ${named.join(", ")}.` : "",
     "Erase them completely so none remain — no chairs, no lamp, no sofa, no table, no plant ghosts or shadows of them.",
     "Fill every white region with the empty room behind (floor, rug, walls, windows, built-in shelves) as if those objects were never there.",
-    "Do not add new furniture. Keep every black (unmasked) pixel identical to the photo.",
+    "Do not add new furniture. Keep the unmasked room areas looking consistent. Return the edited photograph.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -629,9 +631,9 @@ function fillVacated(
 }
 
 /**
- * Last-push presentation: start from the original photo, apply segment edits on top.
- * When an object is hidden or moved, fill the vacated mask with `fillSrc` (saved
- * empty background) instead of blurring.
+ * Start from the working photo, apply segment edits on top.
+ * Empty-bg punch (`fillSrc`) runs only when an object is removed (hidden) —
+ * not for adds, recolors, or moves.
  */
 export async function renderLocal(
   originalSrc: string,
@@ -657,44 +659,54 @@ export async function renderLocal(
     // Suggested add-ons (curtain, etc.) are not in the original — never punch holes for them.
     const additive = Boolean(object.suggested);
 
+    // Empty-bg punch ONLY on remove, and only while a fill image is supplied.
+    // Callers pass no fill after an AI photo is the working base (avoids rug blotches).
+    if (object.hidden) {
+      if (!additive && fill) fillVacated(ctx, cut.canvas, fill, width, height);
+      continue;
+    }
+
     if (object.layer) {
-      if (object.hidden) {
-        if (!additive) fillVacated(ctx, cut.canvas, fill, width, height);
+      const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
+      const tinting = Boolean(object.tint && (object.cover ?? TINT) > 0.01);
+      // Approved AI add: already in the working photo — leave those pixels alone.
+      if (object.baked && !moved && !tinting) {
         continue;
       }
       const sprite = await loadImage(object.layer);
-      const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
-      if (moved && !additive) {
-        fillVacated(ctx, cut.canvas, fill, width, height);
-      }
       ctx.save();
       ctx.translate(cut.cx + object.dx * width, cut.cy + object.dy * height);
       ctx.scale(scale, scale);
       ctx.translate(-cut.cx, -cut.cy);
-      ctx.drawImage(sprite, 0, 0, width, height);
-      if (object.tint) {
-        ctx.globalAlpha = object.cover ?? TINT;
-        ctx.drawImage(await flatMask(object.mask, shadeHex(object.tint, object.shade || 0), width, height), 0, 0);
+      if (tinting) {
+        // Recolor only the sprite's opaque pixels so added items (curtain, etc.) pick up swatches.
+        const tinted = document.createElement("canvas");
+        tinted.width = width;
+        tinted.height = height;
+        const tintCtx = tinted.getContext("2d");
+        if (tintCtx) {
+          tintCtx.drawImage(sprite, 0, 0, width, height);
+          tintCtx.globalCompositeOperation = "source-atop";
+          tintCtx.globalAlpha = object.cover ?? TINT;
+          tintCtx.fillStyle = shadeHex(object.tint!, object.shade || 0);
+          tintCtx.fillRect(0, 0, width, height);
+          ctx.drawImage(tinted, 0, 0);
+        } else {
+          ctx.drawImage(sprite, 0, 0, width, height);
+        }
+      } else {
+        ctx.drawImage(sprite, 0, 0, width, height);
       }
       ctx.restore();
       continue;
     }
 
-    if (object.hidden) {
-      if (!additive) fillVacated(ctx, cut.canvas, fill, width, height);
-      continue;
-    }
-
     const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
-    if (moved && !additive) {
-      fillVacated(ctx, cut.canvas, fill, width, height);
-    }
-
     ctx.save();
     ctx.translate(cut.cx + object.dx * width, cut.cy + object.dy * height);
     ctx.scale(scale, scale);
     ctx.translate(-cut.cx, -cut.cy);
-    ctx.drawImage(cut.canvas, 0, 0);
+    if (moved) ctx.drawImage(cut.canvas, 0, 0);
     if (object.blur && object.blur > 0) {
       const layer = document.createElement("canvas");
       layer.width = width;

@@ -21,9 +21,20 @@ export type MaskImage = { data: string; mime: string };
 function guidedPrompt(prompt: string, mask?: MaskImage) {
   if (!mask) return prompt;
   return [
-    "The first image is the photo. The second image is a mask of the same size: white pixels are the only region you may change, and black pixels must stay identical to the photo.",
-    `Further change, only inside the white region: ${prompt}`,
+    "The first image is the photo. The second image is a mask of the same size: edit only inside white pixels; keep black-masked areas looking natural.",
+    `Change only inside the white region: ${prompt}`,
+    "Return the edited photograph.",
   ].join("\n");
+}
+
+/** Gemini IMAGE_RECITATION often fires on “identical pixel / copy this photo” wording. */
+function softGeminiPrompt(prompt: string) {
+  return prompt
+    .replace(/\bleave every other pixel identical\b/gi, "keep the rest of the room looking natural")
+    .replace(/\bidentical to the photo\b/gi, "consistent with the photo")
+    .replace(/\bThis is the same photograph\.\s*/gi, "")
+    .replace(/\bKeep every black \(unmasked\) pixel identical[^.]*\./gi, "Keep unmasked areas looking natural.")
+    .trim();
 }
 
 export async function runEditor(
@@ -38,26 +49,47 @@ export async function runEditor(
   if (!apiKey) throw new Error(`No key for ${name}`);
   const text = guidedPrompt(prompt, mask);
 
-  if (editor === "nano_banana") {
-    return nanoBanana(apiKey, text, image, mime, mask, key("GEMINI_IMAGE_MODEL") || "gemini-3.1-flash-image", "Nano Banana");
-  }
-  if (editor === "nano_banana_lite") {
-    return nanoBanana(
-      apiKey,
-      text,
-      image,
-      mime,
-      mask,
-      key("GEMINI_LITE_IMAGE_MODEL") || "gemini-3.1-flash-lite-image",
-      "Nano Banana Lite"
-    );
+  // Lite is unreliable — always use full Nano Banana, with recitation-safe retries.
+  if (editor === "nano_banana" || editor === "nano_banana_lite") {
+    try {
+      return await nanoBananaSafe(
+        apiKey,
+        softGeminiPrompt(text),
+        image,
+        mime,
+        mask,
+        key("GEMINI_IMAGE_MODEL") || "gemini-3.1-flash-image",
+        "Nano Banana"
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!/IMAGE_RECITATION|returned no image|no candidates/i.test(message)) throw error;
+      const alt = await tryAlternateEditors(softGeminiPrompt(text), image, mime, mask);
+      if (alt) return alt;
+      throw error;
+    }
   }
   if (editor === "qwen_image_3") return qwen(apiKey, text, image, mime, mask);
   if (editor === "seedream_5_pro") return seedream(apiKey, text, image, mime, mask);
   return gptImage(apiKey, text, image, mime, mask);
 }
 
-async function nanoBanana(
+async function tryAlternateEditors(prompt: string, image: string, mime: string, mask?: MaskImage) {
+  // Qwen works but is slow; still better than a hard 502 on IMAGE_RECITATION.
+  for (const id of ["qwen_image_3", "gpt_image_2"] as EditorId[]) {
+    const apiKey = key(KEY_NAME[id]);
+    if (!apiKey) continue;
+    try {
+      if (id === "qwen_image_3") return await qwen(apiKey, prompt, image, mime, mask);
+      return await gptImage(apiKey, prompt, image, mime, mask);
+    } catch (error) {
+      console.error("[runEdit] alternate", id, error instanceof Error ? error.message : error);
+    }
+  }
+  return null;
+}
+
+async function nanoBananaSafe(
   apiKey: string,
   prompt: string,
   image: string,
@@ -66,33 +98,86 @@ async function nanoBanana(
   model: string,
   label: string
 ) {
+  const attempts: Array<{
+    prompt: string;
+    model: string;
+    imageFirst: boolean;
+    modalities: string[];
+  }> = [
+    { prompt, model, imageFirst: false, modalities: ["TEXT", "IMAGE"] },
+    { prompt, model, imageFirst: true, modalities: ["IMAGE"] },
+    {
+      prompt: `${prompt} Create a fresh photorealistic edit of this interior. Return only the edited photo.`,
+      model,
+      imageFirst: true,
+      modalities: ["IMAGE"],
+    },
+  ];
+  const fallback = key("GEMINI_IMAGE_FALLBACK_MODEL") || "gemini-2.5-flash-image";
+  if (fallback !== model) {
+    attempts.push({ prompt, model: fallback, imageFirst: true, modalities: ["IMAGE"] });
+  }
+
+  let lastError: Error | null = null;
+  for (const attempt of attempts) {
+    try {
+      return await nanoBananaOnce(
+        apiKey,
+        attempt.prompt,
+        image,
+        mime,
+        mask,
+        attempt.model,
+        label,
+        attempt.imageFirst,
+        attempt.modalities
+      );
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!/IMAGE_RECITATION|returned no image|no candidates/i.test(lastError.message)) throw lastError;
+    }
+  }
+  throw lastError || new Error(`${label} returned no image (IMAGE_RECITATION)`);
+}
+
+async function nanoBananaOnce(
+  apiKey: string,
+  prompt: string,
+  image: string,
+  mime: string,
+  mask: MaskImage | undefined,
+  model: string,
+  label: string,
+  imageFirst: boolean,
+  modalities: string[]
+) {
+  const media = [
+    { inline_data: { mime_type: mime, data: image } },
+    ...(mask ? [{ inline_data: { mime_type: mask.mime, data: mask.data } }] : []),
+  ];
+  const parts = imageFirst ? [...media, { text: prompt }] : [{ text: prompt }, ...media];
+
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mime, data: image } },
-              ...(mask ? [{ inline_data: { mime_type: mask.mime, data: mask.data } }] : []),
-            ],
-          },
-        ],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        contents: [{ parts }],
+        generationConfig: { responseModalities: modalities, temperature: 0.7 },
       }),
       signal: AbortSignal.timeout(120_000),
     }
   );
   const body = await readJson(response, label);
-  const parts = body.candidates?.[0]?.content?.parts ?? [];
-  for (const part of parts) {
+  const candidate = body.candidates?.[0];
+  const outParts = candidate?.content?.parts ?? [];
+  for (const part of outParts) {
     const inline = part.inlineData ?? part.inline_data;
     if (inline?.data) return dataUrl(inline.mimeType || inline.mime_type || "image/png", inline.data);
   }
-  throw new Error(`${label} returned no image`);
+  const finish = candidate?.finishReason || body.promptFeedback?.blockReason || "";
+  throw new Error(`${label} returned no image${finish ? ` (${finish})` : ""}`);
 }
 
 async function qwen(apiKey: string, prompt: string, image: string, mime: string, mask?: MaskImage) {

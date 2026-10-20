@@ -197,12 +197,15 @@
   padding: 0;
   cursor: grab;
   touch-action: none;
+  /* Hit-testing goes through the photo; only the active box handles drag / delete. */
+  pointer-events: none;
 }
 
 .ae-box.on {
   outline: 1.5px solid #d4f5ac;
   z-index: 30;
   background: #d4f5ac09;
+  pointer-events: auto;
 }
 
 .ae-x, .ae-resize { position: absolute; z-index: 2; padding: 0; }
@@ -496,6 +499,14 @@
 }
 
 .ae-option-title { margin: 0; width: 100%; text-align: center; font-size: 11px; line-height: 1; color: #c8cacf; }
+.ae-option-hint {
+  margin: 2px 0 0;
+  width: 100%;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #8b8e96;
+}
 .ae-option-row { display: flex; gap: 9px; align-items: center; justify-content: center; width: 100%; min-width: 0; box-sizing: border-box; }
 .ae-colors, .ae-shades { flex-wrap: nowrap; flex-shrink: 0; }
 .ae-picks {
