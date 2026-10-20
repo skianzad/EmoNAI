@@ -3,6 +3,7 @@ import { key } from "./keys";
 
 const KEY_NAME: Record<EditorId, string> = {
   nano_banana: "GEMINI_API_KEY",
+  nano_banana_lite: "GEMINI_API_KEY",
   qwen_image_3: "DASHSCOPE_API_KEY",
   seedream_5_pro: "ARK_API_KEY",
   gpt_image_2: "OPENAI_API_KEY",
@@ -37,14 +38,34 @@ export async function runEditor(
   if (!apiKey) throw new Error(`No key for ${name}`);
   const text = guidedPrompt(prompt, mask);
 
-  if (editor === "nano_banana") return nanoBanana(apiKey, text, image, mime, mask);
+  if (editor === "nano_banana") {
+    return nanoBanana(apiKey, text, image, mime, mask, key("GEMINI_IMAGE_MODEL") || "gemini-3.1-flash-image", "Nano Banana");
+  }
+  if (editor === "nano_banana_lite") {
+    return nanoBanana(
+      apiKey,
+      text,
+      image,
+      mime,
+      mask,
+      key("GEMINI_LITE_IMAGE_MODEL") || "gemini-3.1-flash-lite-image",
+      "Nano Banana Lite"
+    );
+  }
   if (editor === "qwen_image_3") return qwen(apiKey, text, image, mime, mask);
   if (editor === "seedream_5_pro") return seedream(apiKey, text, image, mime, mask);
   return gptImage(apiKey, text, image, mime, mask);
 }
 
-async function nanoBanana(apiKey: string, prompt: string, image: string, mime: string, mask?: MaskImage) {
-  const model = key("GEMINI_IMAGE_MODEL") || "gemini-3.1-flash-image";
+async function nanoBanana(
+  apiKey: string,
+  prompt: string,
+  image: string,
+  mime: string,
+  mask: MaskImage | undefined,
+  model: string,
+  label: string
+) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
@@ -65,13 +86,13 @@ async function nanoBanana(apiKey: string, prompt: string, image: string, mime: s
       signal: AbortSignal.timeout(120_000),
     }
   );
-  const body = await readJson(response, "Nano Banana");
+  const body = await readJson(response, label);
   const parts = body.candidates?.[0]?.content?.parts ?? [];
   for (const part of parts) {
     const inline = part.inlineData ?? part.inline_data;
     if (inline?.data) return dataUrl(inline.mimeType || inline.mime_type || "image/png", inline.data);
   }
-  throw new Error("Nano Banana returned no image");
+  throw new Error(`${label} returned no image`);
 }
 
 async function qwen(apiKey: string, prompt: string, image: string, mime: string, mask?: MaskImage) {

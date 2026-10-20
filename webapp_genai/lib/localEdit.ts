@@ -1,9 +1,16 @@
 import type { Island } from "@/data/edits";
 import { objectsFromPaint, type NamedColor } from "@/lib/colorAdjust";
+import { callEditor } from "@/lib/callEditor";
 import { COLOR_MAP_PALETTE, guidePrompt } from "@/lib/colorMapPrompt";
 import { fitImage, readDataUrl } from "@/lib/shrink";
 import { splitIslands } from "@/lib/splitIslands";
 import { uid } from "@/lib/uid";
+
+const BACKDROP = /background|backdrop|wall|floor|ceiling|sky|ground|carpet|rug/i;
+
+export function isBackdrop(name: string) {
+  return BACKDROP.test(name);
+}
 
 export type Box = { x: number; y: number; w: number; h: number };
 
@@ -72,7 +79,9 @@ export async function segmentPhoto(
     paintedSrc,
     named,
     kind === "objects" ? 400 : 80,
-    kind !== "objects",
+    // Face regions can be split (e.g. both under-eyes). Room furniture must use
+    // the largest blob only — keepAll left speckles that blew up the right-chair box.
+    kind === "face",
     kind === "room" ? 110 : 58
   );
   if (byColor.length > 0) return byColor;
@@ -93,6 +102,61 @@ export async function segmentPhoto(
       box: await maskBox(object.mask),
     }))
   );
+}
+
+function softenMask(mask: HTMLCanvasElement | HTMLImageElement, width: number, height: number, radius: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.filter = `blur(${Math.max(0.5, radius)}px)`;
+  ctx.drawImage(mask, 0, 0, width, height);
+  ctx.filter = "none";
+  const image = ctx.getImageData(0, 0, width, height);
+  for (let i = 3; i < image.data.length; i += 4) {
+    const alpha = image.data[i];
+    // Keep a light feather only — do not inflate alpha (that caused ghost halos).
+    image.data[i] = alpha < 12 ? 0 : alpha;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}
+
+function rimRadius(width: number, height: number) {
+  return Math.max(2, Math.round(Math.min(width, height) * 0.003));
+}
+
+/** Binary mask: alpha >= 128 → 255, else 0. Optional tiny dilate via blur+threshold. */
+async function hardMask(maskSrc: string, width: number, height: number, dilate = 0) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  const source = await loadImage(maskSrc);
+  if (dilate > 0) {
+    ctx.filter = `blur(${dilate}px)`;
+    ctx.drawImage(source, 0, 0, width, height);
+    ctx.filter = "none";
+  } else {
+    ctx.drawImage(source, 0, 0, width, height);
+  }
+  const image = ctx.getImageData(0, 0, width, height);
+  for (let i = 3; i < image.data.length; i += 4) {
+    image.data[i] = image.data[i] >= 128 ? 255 : 0;
+    if (image.data[i] === 0) {
+      image.data[i - 3] = 0;
+      image.data[i - 2] = 0;
+      image.data[i - 1] = 0;
+    } else {
+      image.data[i - 3] = 255;
+      image.data[i - 2] = 255;
+      image.data[i - 1] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
 }
 
 /** Cover the whole object with a blur wide enough that its center smears into the surroundings. */
@@ -123,17 +187,265 @@ function eraseObject(ctx: CanvasRenderingContext2D, mask: HTMLCanvasElement, wid
     if (y > maxY) maxY = y;
   }
   const radius = Math.max(36, Math.round(Math.max(maxX - minX, maxY - minY) * 0.45));
+  const soft = softenMask(mask, width, height, Math.max(8, Math.round(radius * 0.12)));
   layerCtx.filter = `blur(${radius}px)`;
   layerCtx.drawImage(ctx.canvas, 0, 0);
   layerCtx.filter = "none";
+  layerCtx.globalCompositeOperation = "destination-in";
+  layerCtx.drawImage(soft, 0, 0);
+  ctx.drawImage(layer, 0, 0);
+}
+
+/**
+ * Own mask owns contested pixels. Neighbors are punched out hard so two layers
+ * never share the same pixel (soft dual-ownership caused the white ghosts).
+ * A small outer feather is applied only after exclusivity.
+ */
+async function exclusiveMask(maskSrc: string, others: string[], width: number, height: number, radius: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  // Slight dilate so each object keeps a thin rim before neighbors reclaim overlap.
+  ctx.drawImage(await hardMask(maskSrc, width, height, Math.max(1, Math.round(radius))), 0, 0);
+  for (const other of others) {
+    ctx.globalCompositeOperation = "destination-out";
+    // Punch neighbors hard (no soft alpha) so contested pixels go to one owner only.
+    ctx.drawImage(await hardMask(other, width, height, 0), 0, 0);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  if (radius <= 0) return canvas;
+  // Light anti-alias on the final silhouette only.
+  return softenMask(canvas, width, height, Math.min(2, radius));
+}
+
+/**
+ * Cut each foreground object from the original photo with its original mask.
+ * No neighbor punch-outs (those ate chair arms/legs). Removal uses the saved
+ * empty background underneath when a layer is hidden.
+ */
+export async function liftLayers(originalSrc: string, objects: SegmentObject[]) {
+  const original = await loadImage(originalSrc);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const rim = rimRadius(width, height);
+  const next: SegmentObject[] = [];
+  for (const object of objects) {
+    if (isBackdrop(object.name)) {
+      next.push({ ...object, layer: undefined });
+      continue;
+    }
+    const cut = await cutout(original, object.mask, width, height, [], rim);
+    if (!cut) {
+      next.push({ ...object, layer: undefined });
+      continue;
+    }
+    next.push({ ...object, layer: cut.canvas.toDataURL("image/png") });
+  }
+  return next;
+}
+
+/** White = remove/edit, black = keep. Union of every foreground segment, slightly grown. */
+async function unionMask(originalSrc: string, objects: SegmentObject[]) {
+  const original = await loadImage(originalSrc);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, width, height);
+  // Grow enough that chair legs, lamp stems, and soft edges are inside the edit region.
+  const grow = Math.max(8, Math.round(Math.min(width, height) * 0.02));
+  for (const object of objects) {
+    const stamp = await hardMask(object.mask, width, height, grow);
+    ctx.drawImage(stamp, 0, 0);
+  }
+  return canvas.toDataURL("image/png");
+}
+
+async function localClearBackground(originalSrc: string, objects: SegmentObject[]) {
+  const original = await loadImage(originalSrc);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return originalSrc;
+  ctx.drawImage(original, 0, 0);
+  for (const object of objects) {
+    const cut = await cutout(original, object.mask, width, height);
+    if (cut) eraseObject(ctx, cut.canvas, width, height);
+  }
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+/** Grow a mask so the editor can fill missing edges of an object. */
+async function growMask(maskSrc: string, width: number, height: number, radius: number) {
+  const soft = softenMask(await loadImage(maskSrc), width, height, radius);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return maskSrc;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(soft, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+/**
+ * Ask the editor for a complete reconstruction of one object, then cut an
+ * exclusive layer (neighbors punched hard so sprites never overlap).
+ */
+async function completeObjectLayer(
+  editorId: string,
+  originalSrc: string,
+  object: SegmentObject,
+  others: string[] = []
+) {
+  const original = await loadImage(originalSrc);
+  const width = original.naturalWidth;
+  const height = original.naturalHeight;
+  const grow = Math.max(8, Math.round(Math.min(width, height) * 0.018));
+  const region = await growMask(object.mask, width, height, grow);
+  const prompt = [
+    `Focus only on the ${object.name}.`,
+    `Reconstruct the complete ${object.name} with every part intact — legs, frame, cushions, arms, and edges. Fill any holes or missing pieces.`,
+    `Keep its exact place, size, pose, lighting, and material in the photo. Do not change any other object.`,
+    `Output one finished photograph.`,
+  ].join(" ");
+  const image = await callEditor(editorId, prompt, originalSrc, region);
+  const fitted = await fitEdited(originalSrc, image);
+  const edited = await loadImage(fitted);
+  const cut = await cutout(edited, object.mask, width, height, others, rimRadius(width, height));
+  if (!cut) return object.layer;
+  return cut.canvas.toDataURL("image/png");
+}
+
+export type PrepareProgress = (message: string) => void;
+
+/**
+ * Ask Nano Banana to erase every identified segment (white in the union mask)
+ * and inpaint a clean empty room. One edit call — no per-object passes.
+ */
+export async function generateEmptyBackground(editorId: string, originalSrc: string, objects: SegmentObject[]) {
+  const foreground = objects.filter((object) => !isBackdrop(object.name));
+  if (foreground.length === 0) return originalSrc;
+  const mask = await unionMask(originalSrc, foreground);
+  if (!mask) return originalSrc;
+  const named = foreground.map((object) => object.name).filter((name) => name && !/^object$/i.test(name));
+  const prompt = [
+    `Remove ALL ${foreground.length} segmented objects marked in white in the mask — every one of them.`,
+    "That includes both leather armchairs, the cream sofa, the round coffee table, the arc floor lamp with its shade, plants, and any other furniture covered by white.",
+    named.length ? `Segment names: ${named.join(", ")}.` : "",
+    "Erase them completely so none remain — no chairs, no lamp, no sofa, no table, no plant ghosts or shadows of them.",
+    "Fill every white region with the empty room behind (floor, rug, walls, windows, built-in shelves) as if those objects were never there.",
+    "Do not add new furniture. Keep every black (unmasked) pixel identical to the photo.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const image = await callEditor(editorId, prompt, originalSrc, mask);
+  return fitEdited(originalSrc, image);
+}
+
+/** AI-complete each object into a full layer sprite. */
+export async function completeObjectLayers(
+  editorId: string,
+  originalSrc: string,
+  objects: SegmentObject[],
+  onProgress?: PrepareProgress
+) {
+  const next: SegmentObject[] = [];
+  const work = objects.filter((object) => !isBackdrop(object.name));
+  for (let index = 0; index < objects.length; index += 1) {
+    const object = objects[index];
+    if (isBackdrop(object.name)) {
+      next.push(object);
+      continue;
+    }
+    const step = work.findIndex((item) => item.id === object.id) + 1;
+    onProgress?.(`Completing ${object.name} (${step}/${work.length})…`);
+    const others = objects
+      .filter((item) => item.id !== object.id && !isBackdrop(item.name))
+      .map((item) => item.mask);
+    try {
+      const layer = await completeObjectLayer(editorId, originalSrc, object, others);
+      next.push({ ...object, layer: layer || object.layer });
+    } catch {
+      next.push(object);
+    }
+  }
+  return next;
+}
+
+/**
+ * First run: generate a clean empty background, then AI-complete each object
+ * into a full layer sprite. Later runs should reuse the saved background/layers.
+ */
+export async function prepareScene(
+  editorId: string,
+  originalSrc: string,
+  objects: SegmentObject[],
+  allowAi = true,
+  onProgress?: PrepareProgress
+) {
+  onProgress?.("Cutting object layers…");
+  const lifted = await liftLayers(originalSrc, objects);
+  const foreground = lifted.filter((object) => !isBackdrop(object.name));
+  if (foreground.length === 0) return { objects: lifted, background: originalSrc };
+
+  if (!allowAi) {
+    const withLayers = lifted.filter((object) => object.layer && !isBackdrop(object.name));
+    return { objects: lifted, background: await localClearBackground(originalSrc, withLayers) };
+  }
+
+  onProgress?.("Generating empty background…");
+  const background = await generateEmptyBackground(editorId, originalSrc, lifted);
+  return { objects: lifted, background };
+}
+
+/** Paste fillSrc pixels inside the mask (empty-room background). Falls back to blur. */
+function fillVacated(
+  ctx: CanvasRenderingContext2D,
+  mask: HTMLCanvasElement,
+  fill: HTMLImageElement | null,
+  width: number,
+  height: number
+) {
+  if (!fill) {
+    eraseObject(ctx, mask, width, height);
+    return;
+  }
+  const layer = document.createElement("canvas");
+  layer.width = width;
+  layer.height = height;
+  const layerCtx = layer.getContext("2d");
+  if (!layerCtx) return;
+  layerCtx.drawImage(fill, 0, 0, width, height);
   layerCtx.globalCompositeOperation = "destination-in";
   layerCtx.drawImage(mask, 0, 0);
   ctx.drawImage(layer, 0, 0);
 }
 
-/** Local color, size, move, hide, and warmth. No editor call. */
-export async function renderLocal(originalSrc: string, objects: SegmentObject[], warmth: number) {
+/**
+ * Last-push presentation: start from the original photo, apply segment edits on top.
+ * When an object is hidden or moved, fill the vacated mask with `fillSrc` (saved
+ * empty background) instead of blurring.
+ */
+export async function renderLocal(
+  originalSrc: string,
+  objects: SegmentObject[],
+  warmth: number,
+  fillSrc?: string | null
+) {
   const original = await loadImage(originalSrc);
+  const fill = fillSrc ? await loadImage(fillSrc) : null;
   const width = original.naturalWidth;
   const height = original.naturalHeight;
   const canvas = document.createElement("canvas");
@@ -147,22 +459,21 @@ export async function renderLocal(originalSrc: string, objects: SegmentObject[],
     const cut = await cutout(original, object.mask, width, height);
     if (!cut) continue;
     const scale = object.scale / 100;
+
     if (object.layer) {
-      if (object.hidden) continue;
+      if (object.hidden) {
+        fillVacated(ctx, cut.canvas, fill, width, height);
+        continue;
+      }
       const sprite = await loadImage(object.layer);
       const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
-      if (moved && cut) {
-        ctx.save();
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.drawImage(cut.canvas, 0, 0);
-        ctx.restore();
+      if (moved) {
+        fillVacated(ctx, cut.canvas, fill, width, height);
       }
       ctx.save();
-      if (cut) {
-        ctx.translate(cut.cx + object.dx * width, cut.cy + object.dy * height);
-        ctx.scale(scale, scale);
-        ctx.translate(-cut.cx, -cut.cy);
-      }
+      ctx.translate(cut.cx + object.dx * width, cut.cy + object.dy * height);
+      ctx.scale(scale, scale);
+      ctx.translate(-cut.cx, -cut.cy);
       ctx.drawImage(sprite, 0, 0, width, height);
       if (object.tint) {
         ctx.globalAlpha = object.cover ?? TINT;
@@ -171,23 +482,17 @@ export async function renderLocal(originalSrc: string, objects: SegmentObject[],
       ctx.restore();
       continue;
     }
+
     if (object.hidden) {
-      eraseObject(ctx, cut.canvas, width, height);
+      fillVacated(ctx, cut.canvas, fill, width, height);
       continue;
     }
+
     const moved = scale !== 1 || object.dx !== 0 || object.dy !== 0;
     if (moved) {
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(cut.canvas, 0, 0);
-      ctx.restore();
-      ctx.save();
-      ctx.filter = "blur(18px)";
-      ctx.globalCompositeOperation = "destination-over";
-      ctx.drawImage(original, 0, 0, width, height);
-      ctx.restore();
+      fillVacated(ctx, cut.canvas, fill, width, height);
     }
-    if (object.hidden) continue;
+
     ctx.save();
     ctx.translate(cut.cx + object.dx * width, cut.cy + object.dy * height);
     ctx.scale(scale, scale);
@@ -337,6 +642,42 @@ function maskUrl(pixels: Uint8Array, width: number, height: number) {
   return canvas.toDataURL("image/png");
 }
 
+/**
+ * Keep only the largest connected blob in a mask and recompute the box.
+ * Fixes room segments that kept color speckles across the whole photo
+ * (e.g. right-chair box spanning most of the frame).
+ */
+export async function tightenSegment(object: SegmentObject): Promise<SegmentObject> {
+  const mask = await loadImage(object.mask);
+  const width = mask.naturalWidth;
+  const height = mask.naturalHeight;
+  if (!width || !height) return object;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return object;
+  ctx.drawImage(mask, 0, 0);
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  const owner = new Int16Array(width * height);
+  for (let i = 0; i < owner.length; i++) owner[i] = pixels[i * 4 + 3] >= 128 ? 0 : -1;
+  const blob = largestBlob(owner, 0, width, height);
+  if (blob.area < 80) return object;
+  const fill = blob.area / Math.max(1, object.box.w * object.box.h * width * height);
+  // Already tight enough.
+  if (fill > 0.2) return { ...object, box: boxOf(blob.pixels, width, height), layer: undefined };
+  return {
+    ...object,
+    mask: maskUrl(blob.pixels, width, height),
+    box: boxOf(blob.pixels, width, height),
+    layer: undefined,
+  };
+}
+
+export async function tightenSegments(objects: SegmentObject[]) {
+  return Promise.all(objects.map((object) => (isBackdrop(object.name) ? object : tightenSegment(object))));
+}
+
 function boxOf(pixels: Uint8Array, width: number, height: number): Box {
   let minX = width;
   let minY = height;
@@ -463,15 +804,13 @@ async function maskBox(maskSrc: string): Promise<Box> {
   };
 }
 
-async function cutout(original: HTMLImageElement, maskSrc: string, width: number, height: number) {
+async function maskCenter(maskSrc: string, width: number, height: number) {
   const mask = await loadImage(maskSrc);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.drawImage(original, 0, 0, width, height);
-  ctx.globalCompositeOperation = "destination-in";
   ctx.drawImage(mask, 0, 0, width, height);
   const pixels = ctx.getImageData(0, 0, width, height).data;
   let sx = 0;
@@ -485,7 +824,28 @@ async function cutout(original: HTMLImageElement, maskSrc: string, width: number
     count += 1;
   }
   if (count === 0) return null;
-  return { canvas, cx: sx / count, cy: sy / count };
+  return { cx: sx / count, cy: sy / count };
+}
+
+async function cutout(
+  original: HTMLImageElement,
+  maskSrc: string,
+  width: number,
+  height: number,
+  others: string[] = [],
+  radius = rimRadius(width, height)
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(original, 0, 0, width, height);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(await exclusiveMask(maskSrc, others, width, height, radius), 0, 0);
+  const center = await maskCenter(maskSrc, width, height);
+  if (!center) return null;
+  return { canvas, cx: center.cx, cy: center.cy };
 }
 
 async function flatMask(maskSrc: string, color: string, width: number, height: number) {

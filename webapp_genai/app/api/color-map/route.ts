@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (editor === "nano_banana") {
+    if (editor === "nano_banana" || editor === "nano_banana_lite") {
       const result = await nanoBananaMap(image, mime, prompt);
       return NextResponse.json(result);
     }

@@ -4,8 +4,16 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { useLang } from "@/lib/i18n";
 import type { EditorId } from "@/data/editors";
 import { callEditor } from "@/lib/callEditor";
-import { loadSegments, saveSegments } from "@/lib/faceSegments";
-import { fitEdited, renderLocal, segmentPhoto, segmentsFromIslands, type SegmentObject } from "@/lib/localEdit";
+import { loadSegments, saveRoomBackground, saveSegments } from "@/lib/faceSegments";
+import {
+  fitEdited,
+  generateEmptyBackground,
+  renderLocal,
+  segmentPhoto,
+  segmentsFromIslands,
+  tightenSegments,
+  type SegmentObject,
+} from "@/lib/localEdit";
 import { fitImage, readDataUrl } from "@/lib/shrink";
 import { diffOutside, splitIslands } from "@/lib/splitIslands";
 import type { Island } from "@/data/edits";
@@ -173,6 +181,7 @@ function objectName(name: string, zh: boolean) {
 export function AiEditApp() {
   const original = SCENE;
   const cache = useRef(new Map<string, SegmentObject[]>());
+  const bgCache = useRef(new Map<string, string>());
   const [mode, setMode] = useState<Mode>("photo");
   const [source, setSource] = useState(original);
   const [working, setWorking] = useState(original);
@@ -188,6 +197,15 @@ export function AiEditApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editorId, setEditorId] = useState<EditorId>("nano_banana");
+  /** Bumps when the empty-background fill becomes available so previews refresh. */
+  const [fillTick, setFillTick] = useState(0);
+  /** Full Nano Banana for heavy scene work; Lite for small segment tweaks / regenerations. */
+  function editorFor(kind: "heavy" | "lite"): EditorId {
+    if (editorId === "nano_banana" || editorId === "nano_banana_lite") {
+      return kind === "heavy" ? "nano_banana" : "nano_banana_lite";
+    }
+    return editorId;
+  }
   const [ratio, setRatio] = useState(16 / 9);
   const [palette, setPalette] = useState<Palette>("ai");
   const [prompt, setPrompt] = useState("");
@@ -236,12 +254,13 @@ export function AiEditApp() {
   useEffect(() => {
     loadSegments("face")
       .then((saved) => {
-        if (saved && !faceCache.current) faceCache.current = saved;
+        if (saved && !faceCache.current) faceCache.current = structuredClone(saved.objects);
       })
       .catch(() => undefined);
     loadSegments("room")
       .then((saved) => {
-        if (saved && !cache.current.has(SCENE)) cache.current.set(SCENE, saved);
+        // Room disk: empty background only. Segment edits stay in-memory for the session.
+        if (saved?.background) bgCache.current.set(SCENE, saved.background);
       })
       .catch(() => undefined);
   }, []);
@@ -259,7 +278,8 @@ export function AiEditApp() {
   useEffect(() => {
     if (mode === "photo" || mode === "retouch" || mode === "review" || mode === "voice" || objects.length === 0) return;
     let cancel = false;
-    renderLocal(working, objects, warmth)
+    // Present the original working photo; fill vacated masks from the saved empty background.
+    renderLocal(working, objects, warmth, bgCache.current.get(source) || null)
       .then((url) => {
         if (!cancel) setView(url);
       })
@@ -269,7 +289,7 @@ export function AiEditApp() {
     return () => {
       cancel = true;
     };
-  }, [mode, working, objects, warmth]);
+  }, [mode, working, objects, warmth, source, fillTick]);
 
   useEffect(() => {
     if (faceObjects.length === 0) return;
@@ -420,32 +440,88 @@ export function AiEditApp() {
     setWarmth(nextWarmth);
   }
 
+  /** Ensure a saved empty background exists for fill-on-remove. Never replaces the on-screen original. */
+  async function ensureEmptyBackground(base: string, segments: SegmentObject[]) {
+    const cached = bgCache.current.get(base);
+    if (cached) {
+      setFillTick((tick) => tick + 1);
+      return cached;
+    }
+    const disk = await loadSegments("room");
+    if (disk?.background) {
+      bgCache.current.set(base, disk.background);
+      setFillTick((tick) => tick + 1);
+      return disk.background;
+    }
+    setSaid(tx("Generating empty background…", "正在生成空背景…"));
+    const background = await generateEmptyBackground(editorFor("heavy"), base, segments);
+    bgCache.current.set(base, background);
+    await saveRoomBackground(background);
+    setSaid("");
+    setFillTick((tick) => tick + 1);
+    return background;
+  }
+
   async function openEdit() {
     setError("");
     const shot = shots.find((item) => item.id === shotId);
     segmentKind.current = shot?.kind === "room" || source === SCENE ? "room" : "objects";
     setMode("home");
-    const saved = cache.current.get(source);
-    if (saved) {
-      setObjects(structuredClone(saved));
-      setSelected(null);
-      if (steps.length === 0) {
-        const count = saved.filter((object) => !object.hidden).length;
-        setSteps([{ id: uid(), label: tx("Opened AI Edit", "打开 AI 编辑"), meta: tx(`Segmented ${count} objects`, `已分出 ${count} 个对象`), objects: structuredClone(saved), warmth, shown: true }]);
-        setAt(0);
+    // Last-push presentation: keep showing the original photo + segment boxes.
+    workingRef.current = source;
+    setWorking(source);
+    setPhoto(source);
+
+    const memory = cache.current.get(source);
+    if (memory?.length) {
+      setBusy(true);
+      try {
+        const next = source === SCENE ? await tightenSegments(memory) : structuredClone(memory);
+        cache.current.set(source, structuredClone(next));
+        setObjects(next);
+        setSelected(null);
+        if (source === SCENE) void ensureEmptyBackground(source, next);
+        if (steps.length === 0) {
+          const count = next.filter((object) => !object.hidden).length;
+          setSteps([
+            {
+              id: uid(),
+              label: tx("Opened AI Edit", "打开 AI 编辑"),
+              meta: tx(`Segmented ${count} objects`, `已分出 ${count} 个对象`),
+              objects: structuredClone(next),
+              warmth,
+              shown: true,
+            },
+          ]);
+          setAt(0);
+        }
+      } finally {
+        setBusy(false);
       }
       return;
     }
+
     setBusy(true);
     try {
-      const stored = source === SCENE ? await loadSegments("room") : null;
-      const next = stored ?? (await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects"));
-      if (!stored && source === SCENE && next.length > 0) saveSegments("room", next);
+      const disk = source === SCENE ? await loadSegments("room") : null;
+      if (disk?.background) bgCache.current.set(source, disk.background);
+      // Always segment fresh for the session — disk only stores the empty background.
+      const raw = await segmentPhoto(editorId, source, source === SCENE ? "room" : "objects");
+      const next = source === SCENE ? await tightenSegments(raw) : raw;
+      if (source === SCENE) await ensureEmptyBackground(source, next);
       cache.current.set(source, structuredClone(next));
       setObjects(next);
       setSelected(null);
-      const step = { id: uid(), label: tx("Opened AI Edit", "打开 AI 编辑"), meta: tx(`Segmented ${next.length} objects`, `已分出 ${next.length} 个对象`), objects: structuredClone(next), warmth: 0, shown: true };
-      setSteps([step]);
+      setSteps([
+        {
+          id: uid(),
+          label: tx("Opened AI Edit", "打开 AI 编辑"),
+          meta: tx(`Segmented ${next.length} objects`, `已分出 ${next.length} 个对象`),
+          objects: structuredClone(next),
+          warmth: 0,
+          shown: true,
+        },
+      ]);
       setAt(0);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not find objects");
@@ -456,6 +532,7 @@ export function AiEditApp() {
   }
 
   function keepRoom(next: SegmentObject[]) {
+    // Session only — do not write move/remove/tint edits to disk.
     cache.current.set(source, structuredClone(next));
   }
 
@@ -506,7 +583,7 @@ export function AiEditApp() {
         "Do not change the walls, floor, windows, lighting, shadows, camera, or framing.",
         "A flat color painted on an object is only the target color for that object. Repaint that object photorealistically in that exact color, and leave every other pixel identical.",
       ].filter(Boolean).join(" ");
-      const image = await callEditor(editorId, promptText, preview);
+      const image = await callEditor(editorFor("lite"), promptText, preview);
       const hinted = items.filter((object) => changes.some((line) => line.toLowerCase().includes(object.name.toLowerCase())));
       const colors = ["#e15b4c", "#3d7ee8", "#2f9d62", "#e0a23a", "#8b6ad6"];
       const split = hinted.length
@@ -660,8 +737,8 @@ export function AiEditApp() {
     setError("");
     setBusy(true);
     try {
-      const next = await segmentPhoto(editorId, shot.src, "objects");
-      const kind = editStyle(next);
+      const segmented = await segmentPhoto(editorId, shot.src, "objects");
+      const kind = editStyle(segmented);
       setShots((list) => list.map((item) => (item.id === shot.id ? { ...item, kind, label: kind === "face" ? "Portrait" : item.label, zh: kind === "face" ? "人像" : item.zh } : item)));
       if (kind === "face") {
         setBusy(false);
@@ -669,10 +746,13 @@ export function AiEditApp() {
         return;
       }
       segmentKind.current = "objects";
-      cache.current.set(shot.src, structuredClone(next));
-      setObjects(next);
+      workingRef.current = shot.src;
+      setWorking(shot.src);
+      setPhoto(shot.src);
+      cache.current.set(shot.src, structuredClone(segmented));
+      setObjects(segmented);
       setSelected(null);
-      setSteps([{ id: uid(), label: tx("Opened AI Edit", "打开 AI 编辑"), meta: tx(`Segmented ${next.length} objects`, `已分出 ${next.length} 个对象`), objects: structuredClone(next), warmth: 0, shown: true }]);
+      setSteps([{ id: uid(), label: tx("Opened AI Edit", "打开 AI 编辑"), meta: tx(`Segmented ${segmented.length} objects`, `已分出 ${segmented.length} 个对象`), objects: structuredClone(segmented), warmth: 0, shown: true }]);
       setAt(0);
       setMode("home");
     } catch (reason) {
@@ -699,7 +779,7 @@ export function AiEditApp() {
     setBusy(true);
     try {
       const stored = base === PORTRAIT ? await loadSegments("face") : null;
-      const next = stored ?? (await segmentPhoto(editorId, base, "face"));
+      const next = stored?.objects ?? (await segmentPhoto(editorId, base, "face"));
       if (!stored && base === PORTRAIT && next.length > 0) saveSegments("face", next);
       if (base === PORTRAIT) faceCache.current = structuredClone(next);
       showFace(next);
@@ -859,7 +939,7 @@ export function AiEditApp() {
     setMode("voice");
     setBusy(true);
     try {
-      const image = await callEditor(editorId, trimmed, view || photo);
+      const image = await callEditor(editorFor("lite"), trimmed, view || photo);
       const before = source;
       const split = await splitIslands(before, image);
       const pack: ChangeSet = {

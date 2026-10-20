@@ -1,5 +1,6 @@
 export const editorChoices = [
   { id: "nano_banana", name: "Nano Banana" },
+  { id: "nano_banana_lite", name: "Nano Banana Lite" },
   { id: "qwen_image_3", name: "Qwen" },
   { id: "seedream_5_pro", name: "Seedream" },
   { id: "gpt_image_2", name: "GPT Image" },
