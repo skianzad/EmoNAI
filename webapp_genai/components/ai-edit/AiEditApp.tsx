@@ -8,8 +8,11 @@ import { loadSegments, resetRoomEdits, saveRoomBackground, saveSegments } from "
 import {
   fitEdited,
   generateColorVariants,
+  generateCrowdBackground,
   generateEmptyBackground,
   isBackdrop,
+  isCrowdPerson,
+  isCrowdSubject,
   isFurnitureRecolor,
   pickVariantColors,
   renderLocal,
@@ -28,13 +31,24 @@ import "./ai-edit.css";
 
 const SCENE = "/scenes/living/armchair.jpg";
 const PORTRAIT = "/scenes/portrait/woman.jpg";
+const CROWD = "/scenes/louvre/crowded.jpg";
 
-type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" };
+type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" | "crowd" };
 
 const STARTER_SHOTS: Shot[] = [
   { id: "room", src: SCENE, label: "Living room", zh: "客厅", kind: "room" },
+  { id: "crowd", src: CROWD, label: "Louvre crowd", zh: "卢浮宫人群", kind: "crowd" },
   { id: "face", src: PORTRAIT, label: "Portrait", zh: "人像", kind: "face" },
 ];
+
+/** Discrete crowd density steps (local hide of saved person segments). */
+const CROWD_LEVELS = [
+  { value: 0, en: "None", zh: "无人" },
+  { value: 1, en: "A few", zh: "少量" },
+  { value: 2, en: "Some", zh: "一些" },
+  { value: 3, en: "Many", zh: "较多" },
+  { value: 4, en: "Full", zh: "满员" },
+] as const;
 
 function editStyle(items: SegmentObject[]): "room" | "face" {
   const names = items.map((object) => object.name.toLowerCase()).join(" ");
@@ -226,6 +240,8 @@ export function AiEditApp() {
   const [hold, setHold] = useState(false);
   const [cleanOn, setCleanOn] = useState<string[]>(["passer"]);
   const [weathered, setWeathered] = useState(true);
+  /** Louvre crowd density: 0 none … 4 full (original). */
+  const [crowdLevel, setCrowdLevel] = useState(4);
   const faceCache = useRef<SegmentObject[] | null>(null);
   const [faceSource, setFaceSource] = useState(PORTRAIT);
   const [faceObjects, setFaceObjects] = useState<SegmentObject[]>([]);
@@ -290,6 +306,13 @@ export function AiEditApp() {
         }
       })
       .catch(() => undefined);
+    loadSegments("crowd")
+      .then((saved) => {
+        if (!saved) return;
+        if (saved.background) bgCache.current.set(CROWD, saved.background);
+        if (saved.objects.length) cache.current.set(CROWD, structuredClone(saved.objects));
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -305,7 +328,10 @@ export function AiEditApp() {
   useEffect(() => {
     if (mode === "photo" || mode === "retouch" || mode === "review" || mode === "voice" || objects.length === 0) return;
     let cancel = false;
-    renderLocal(working, objects, warmth, bgCache.current.get(source) || null)
+    const empty = bgCache.current.get(source) || null;
+    // When None already shows the saved empty courtyard, skip punch (avoids soft ghosts on clean bg).
+    const fill = empty && working === empty ? null : empty;
+    renderLocal(working, objects, warmth, fill)
       .then((url) => {
         if (!cancel) setView(url);
       })
@@ -317,16 +343,28 @@ export function AiEditApp() {
     };
   }, [mode, working, objects, warmth, source, fillTick]);
 
-  /** Append edit / suggestion lines to the prompt (deduped, latest at the bottom). */
-  function appendPromptLines(...incoming: string[]) {
-    const additions = incoming.map((line) => line.trim()).filter(Boolean);
-    if (!additions.length) return;
+  /**
+   * Keep auto edit lines in sync with the current segments (recolor / move / remove).
+   * Recoloring the same object replaces its line instead of stacking a new one.
+   * Manual prompt text that isn't an auto edit line is preserved.
+   */
+  function syncPromptFromEdits(autoLines: string[], names: string[]) {
+    const managed = (line: string) => {
+      if (/^Make the whole photo (warmer|cooler)\.?$/i.test(line)) return true;
+      if (/^Light the subject from the /i.test(line)) return true;
+      return names.some((name) => {
+        const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return (
+          new RegExp(`^Remove the ${n}\\.?$`, "i").test(line) ||
+          new RegExp(`^Recolor only the ${n}\\b`, "i").test(line) ||
+          new RegExp(`\\b(enlarge|shrink|move|blur) the ${n}\\b`, "i").test(line)
+        );
+      });
+    };
     setPrompt((prev) => {
       const existing = prev.split("\n").map((line) => line.trim()).filter(Boolean);
-      const next = [...existing];
-      for (const line of additions) {
-        if (!next.includes(line)) next.push(line);
-      }
+      const kept = existing.filter((line) => !managed(line));
+      const next = [...kept, ...autoLines.map((line) => line.trim()).filter(Boolean)];
       return next.join("\n");
     });
     requestAnimationFrame(() => {
@@ -341,17 +379,17 @@ export function AiEditApp() {
     if (mode === "photo" || mode === "review" || mode === "voice" || busy) return;
     const items = mode === "retouch" ? (faceLive.current.length ? faceLive.current : faceObjects) : objects;
     const nextLight = mode === "retouch" ? light : undefined;
-    const lines = editLines(
-      items.filter((object) => {
-        if (object.hidden || object.suggested) return false;
-        // Baked sofa/chair packs are local switches — don't re-queue for Nano Banana.
-        if (object.variants?.length && object.cover === 0) return false;
-        return true;
-      }),
-      0,
-      nextLight
-    );
-    appendPromptLines(...lines);
+    const editable = items.filter((object) => {
+      if (object.suggested) return false;
+      // Hidden removals still need a prompt line.
+      if (object.hidden) return true;
+      // Baked sofa/chair packs are local switches — don't re-queue for Nano Banana.
+      if (object.variants?.length && object.cover === 0) return false;
+      return true;
+    });
+    const auto = editLines(editable, 0, nextLight);
+    const names = items.map((object) => object.name).filter(Boolean);
+    syncPromptFromEdits(auto, names);
   }, [mode, objects, faceObjects, light, eyes, lines, blur, busy]);
 
   useEffect(() => {
@@ -525,6 +563,84 @@ export function AiEditApp() {
     return background;
   }
 
+  async function openCrowd(base = CROWD) {
+    setError("");
+    segmentKind.current = "objects";
+    setSource(base);
+    workingRef.current = base;
+    setWorking(base);
+    setPhoto(base);
+    setView(null);
+    setSelected(null);
+    setObjects([]);
+    setSteps([]);
+    setAt(0);
+    setCrowdLevel(4);
+    setMode("home");
+    setBusy(true);
+    try {
+      // Prefer saved crowd-segments.json — never re-run color-map when it exists.
+      let saved = await loadSegments("crowd");
+      if (!saved?.objects?.length) {
+        setSaid(tx("Segmenting people in the courtyard…", "正在分割庭院中的人物…"));
+        const segmented = await segmentPhoto(editorId, base, "crowd");
+        if (!segmented.length) throw new Error(tx("Could not segment the crowd.", "无法分割人群。"));
+        // Save masks first (large payload), then empty courtyard separately.
+        await saveSegments("crowd", segmented);
+        setSaid(tx("Building empty courtyard…", "正在生成空庭院…"));
+        const people = segmented.filter(isCrowdPerson);
+        const background = people.length
+          ? await generateCrowdBackground(editorFor("heavy"), base, people)
+          : base;
+        await saveSegments("crowd", [], background, { replaceBackground: true });
+        // Re-load so background is the stable public URL on disk.
+        saved = (await loadSegments("crowd")) || { objects: segmented, background };
+        if (!saved.background) saved = { objects: segmented, background };
+        bgCache.current.set(base, saved.background || background);
+      } else if (!saved.background) {
+        setSaid(tx("Building empty courtyard…", "正在生成空庭院…"));
+        const people = saved.objects.filter(isCrowdPerson);
+        const background = people.length
+          ? await generateCrowdBackground(editorFor("heavy"), base, people)
+          : base;
+        await saveSegments("crowd", [], background, { replaceBackground: true });
+        const again = await loadSegments("crowd");
+        saved = {
+          objects: saved.objects,
+          background: again?.background || background,
+        };
+        bgCache.current.set(base, saved.background!);
+      } else {
+        bgCache.current.set(base, saved.background);
+      }
+      const next = structuredClone(saved!.objects);
+      cache.current.set(base, structuredClone(next));
+      setObjects(next);
+      setFillTick((tick) => tick + 1);
+      setSteps([
+        {
+          id: uid(),
+          label: tx("Opened crowd edit", "打开人群编辑"),
+          meta: tx(
+            `${next.filter(isCrowdPerson).length} people segmented · slider is local`,
+            `已分出 ${next.filter(isCrowdPerson).length} 人 · 滑块本地切换`
+          ),
+          objects: structuredClone(next),
+          warmth: 0,
+          shown: true,
+        },
+      ]);
+      setAt(0);
+      applyCrowdLevel(4, next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : tx("Could not open the crowd scene.", "无法打开人群场景。"));
+      setMode("photo");
+    } finally {
+      setBusy(false);
+      setSaid("");
+    }
+  }
+
   async function openEdit() {
     setError("");
     const shot = shots.find((item) => item.id === shotId);
@@ -534,6 +650,10 @@ export function AiEditApp() {
     workingRef.current = source;
     setWorking(source);
     setPhoto(source);
+    setSelected(null);
+    setObjects([]);
+    setSteps([]);
+    setAt(0);
 
     const memory = cache.current.get(source);
     if (memory?.length) {
@@ -544,20 +664,18 @@ export function AiEditApp() {
         setObjects(next);
         setSelected(null);
         if (source === SCENE) void ensureEmptyBackground(source, next);
-        if (steps.length === 0) {
-          const count = next.filter((object) => !object.hidden).length;
-          setSteps([
-            {
-              id: uid(),
-              label: tx("Opened AI Edit", "打开 AI 编辑"),
-              meta: tx(`Segmented ${count} objects`, `已分出 ${count} 个对象`),
-              objects: structuredClone(next),
-              warmth,
-              shown: true,
-            },
-          ]);
-          setAt(0);
-        }
+        const count = next.filter((object) => !object.hidden).length;
+        setSteps([
+          {
+            id: uid(),
+            label: tx("Opened AI Edit", "打开 AI 编辑"),
+            meta: tx(`Segmented ${count} objects`, `已分出 ${count} 个对象`),
+            objects: structuredClone(next),
+            warmth: 0,
+            shown: true,
+          },
+        ]);
+        setAt(0);
       } finally {
         setBusy(false);
       }
@@ -674,28 +792,31 @@ export function AiEditApp() {
   }
 
   /**
-   * Add flow: AI returns a full new photo (preview that), assume only the new
-   * section changed, keep every old segment, and lift just that island from the
-   * new photo as an extra layer (empty-bg punch underneath).
+   * Add flow: AI returns a full new photo (preview that). The new segment mask is
+   * the subtract of (photo sent to AI) − (AI result), ignoring pixels already
+   * owned by existing segments, then the layer is cut from the AI photo.
    */
   async function previewAddFromPhoto(promptText: string, items: SegmentObject[], beforeSrc: string) {
-    const existing = items.filter((object) => !object.hidden && !isBackdrop(object.name)).map((object) => object.name);
+    const visible = items.filter((object) => !object.hidden && !isBackdrop(object.name));
     const guided = [
       "This is the exact same photograph — keep the identical camera, framing, crop, perspective, and aspect ratio.",
       "Do not zoom, pan, reframe, or change the viewpoint. Walls, floor, windows, lighting, and shadows stay the same.",
-      existing.length ? `Keep these existing objects unchanged: ${existing.join(", ")}.` : "",
+      visible.length ? `Keep these existing objects unchanged: ${visible.map((object) => object.name).join(", ")}.` : "",
       `Only apply this edit: ${promptText}`,
       "Change only the new section needed for that edit; leave every other pixel looking like the original photo.",
       "Return the edited photograph at the same size and framing.",
     ]
       .filter(Boolean)
       .join(" ");
-    const image = await callEditor(editorFor("lite"), guided, beforeSrc);
-    const split = await splitIslands(beforeSrc, image);
+    const raw = await callEditor(editorFor("lite"), guided, beforeSrc);
+    const edited = await fitEdited(beforeSrc, raw);
+    // Full subtract of (photo sent → AI result). Do not carve out old masks — a new
+    // chair often overlaps an old footprint, and that made the mask too thin to click.
+    const split = await splitIslands(beforeSrc, edited);
     const biggest = pickBiggestIsland(split.islands);
     if (!biggest) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
-    // No hints — never rewrite an existing plant/sofa/etc.
-    const [segment] = await segmentsFromIslands(split.edited, [biggest], []);
+    // Cut the new layer from the AI photo using the subtract mask — never rewrite old segments.
+    const [segment] = await segmentsFromIslands(edited, [biggest], []);
     if (!segment?.layer) throw new Error(tx("Could not find the new edit.", "没有找到新的改动。"));
     const ready: SegmentObject = {
       ...segment,
@@ -716,13 +837,13 @@ export function AiEditApp() {
     };
     const pack: ChangeSet = {
       before: beforeSrc,
-      edited: split.edited,
+      edited,
       islands: [{ ...biggest, id: ready.id, label: ready.name, on: true }],
       pending: [ready],
     };
     // Preview the full AI photo; old segments untouched until Accept.
     setChanges(pack);
-    setView(split.edited);
+    setView(edited);
     setSelected(ready.id);
     setMode("review");
     return ready;
@@ -953,7 +1074,53 @@ export function AiEditApp() {
     setSelected(null);
     setHold(false);
     setError("");
+    // Drop prior scene segments so man/woman (etc.) don't linger on the next shot.
+    setObjects([]);
+    setSteps([]);
+    setAt(0);
+    setChanges(null);
     setMode("photo");
+    if (shot.kind === "crowd") setCrowdLevel(4);
+  }
+
+  /**
+   * Local only: hide background people by density. Uses the saved empty courtyard
+   * punch under removed people — no Nano Banana regeneration.
+   */
+  function applyCrowdLevel(level: number, items?: SegmentObject[]) {
+    const step = CROWD_LEVELS.find((item) => item.value === level) || CROWD_LEVELS[CROWD_LEVELS.length - 1];
+    setCrowdLevel(step.value);
+    if (source !== CROWD && !items) return;
+    const baseItems = items || cache.current.get(CROWD) || objects;
+    const people = baseItems
+      .filter(isCrowdPerson)
+      .sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h);
+    // None (0) = hide every background person. Full (4) = show all.
+    const keepCount = step.value <= 0 ? 0 : Math.round((people.length * step.value) / 4);
+    const keepIds = new Set(people.slice(0, keepCount).map((object) => object.id));
+    const next = baseItems.map((object) => {
+      if (isCrowdSubject(object) || isBackdrop(object.name)) return { ...object, hidden: false };
+      if (isCrowdPerson(object)) return { ...object, hidden: !keepIds.has(object.id) };
+      return object;
+    });
+    setObjects(next);
+    cache.current.set(CROWD, structuredClone(next));
+
+    const empty = bgCache.current.get(CROWD) || null;
+    // None → show the saved empty courtyard (couple only). Mid levels punch soft edges from it.
+    if (step.value <= 0 && empty) {
+      workingRef.current = empty;
+      setWorking(empty);
+      setPhoto(empty);
+      setView(null);
+      setFillTick((tick) => tick + 1);
+      return;
+    }
+
+    workingRef.current = CROWD;
+    setWorking(CROWD);
+    setPhoto(CROWD);
+    setFillTick((tick) => tick + 1);
   }
 
   async function addShot(file: File) {
@@ -977,6 +1144,10 @@ export function AiEditApp() {
     const shot = shots.find((item) => item.id === shotId) ?? shots[0];
     if (shot.kind === "face") {
       await openRetouch(shot.src);
+      return;
+    }
+    if (shot.kind === "crowd") {
+      await openCrowd(shot.src);
       return;
     }
     if (shot.kind === "room") {
@@ -1270,12 +1441,16 @@ export function AiEditApp() {
     const px = Math.floor(mx * bits.width);
     const py = Math.floor(my * bits.height);
     if (px < 0 || py < 0 || px >= bits.width || py >= bits.height) return false;
-    return bits.alpha[py * bits.width + px] > 24;
+    if (bits.alpha[py * bits.width + px] > 24) return true;
+    // AI-added objects: subtract masks can be patchy — box hit is enough to select.
+    return Boolean(object.baked);
   }
 
   function segmentAt(nx: number, ny: number, items: SegmentObject[]) {
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-      if (onSegment(items[index], nx, ny)) return items[index];
+    // Prefer AI-added segments when boxes overlap an older object in the same spot.
+    const ranked = [...items].sort((a, b) => Number(Boolean(a.baked)) - Number(Boolean(b.baked)));
+    for (let index = ranked.length - 1; index >= 0; index -= 1) {
+      if (onSegment(ranked[index], nx, ny)) return ranked[index];
     }
     return null;
   }
@@ -1362,6 +1537,13 @@ export function AiEditApp() {
     }
     setListening(false);
     setVoiceDraft("");
+    // Leaving edit → photo picker: clear live segments (cache keeps them per scene).
+    setObjects([]);
+    setSteps([]);
+    setAt(0);
+    setSelected(null);
+    setView(null);
+    setChanges(null);
     setMode("photo");
   }
 
@@ -1674,7 +1856,16 @@ export function AiEditApp() {
         />
       ) : (
         <section className="ae-editor">
-          {mode === "object" && current ? (
+          {source === CROWD && mode !== "review" ? (
+            <div className="ae-examples">
+              <CrowdSlider
+                level={crowdLevel}
+                busy={busy}
+                zh={zh}
+                onChange={(level) => applyCrowdLevel(level)}
+              />
+            </div>
+          ) : mode === "object" && current ? (
             <div className="ae-examples">
               <div className="ae-object-options">
                 <p className="ae-option-title"><span>{tx("Change color", "修改颜色")}</span></p>
@@ -1863,6 +2054,45 @@ export function AiEditApp() {
     </div>
   );
 }
+function CrowdSlider(props: { level: number; busy: boolean; zh: boolean; onChange: (level: number) => void }) {
+  const current = CROWD_LEVELS.find((item) => item.value === props.level) || CROWD_LEVELS[CROWD_LEVELS.length - 1];
+  return (
+    <div className="ae-crowd">
+      <p className="ae-option-title"><span>{props.zh ? "庭院人数" : "Crowd in the courtyard"}</span></p>
+      <p className="ae-crowd-value">{props.zh ? current.zh : current.en}</p>
+      <input
+        type="range"
+        className="ae-crowd-range"
+        min={0}
+        max={4}
+        step={1}
+        value={props.level}
+        disabled={props.busy}
+        aria-label={props.zh ? "庭院人数" : "Crowd density"}
+        onChange={(event) => props.onChange(Number(event.target.value))}
+      />
+      <div className="ae-crowd-ticks" aria-hidden="true">
+        {CROWD_LEVELS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={props.level === item.value ? "on" : ""}
+            disabled={props.busy}
+            onClick={() => props.onChange(item.value)}
+          >
+            {props.zh ? item.zh : item.en}
+          </button>
+        ))}
+      </div>
+      <p className="ae-option-hint">
+        {props.zh
+          ? "人物已预分割并保存。滑块只本地隐藏游客，不会重新生成。"
+          : "People are pre-segmented and saved. The slider only hides visitors locally — no regeneration."}
+      </p>
+    </div>
+  );
+}
+
 function Cleanup(props: { cleanOn: string[]; weathered: boolean; busy: boolean; onToggle: (id: string) => void; onWeather: (keep: boolean) => void; onErase: () => void; onHold: (hold: boolean) => void }) {
   const { lang } = useLang();
   const zh = lang === "zh";

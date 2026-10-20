@@ -249,6 +249,8 @@ export async function diffOutside(originalSrc: string, editedSrc: string, covere
       if (alpha[i]) changed[i] = 0;
     }
   }
+  // Same cleanup as splitIslands so the new-object mask is a solid region.
+  solidify(changed, width, height);
 
   const labels = new Int32Array(changed.length);
   const areas: number[] = [];

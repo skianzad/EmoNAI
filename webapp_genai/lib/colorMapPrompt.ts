@@ -49,6 +49,36 @@ export function guidePrompt(regions: { name: string; left: number; top: number; 
   ].join("\n");
 }
 
+/** Extra rare colors so we can mark many background people separately. */
+export const CROWD_COLOR_MAP_PALETTE = [
+  ...COLOR_MAP_PALETTE,
+  "#FF0040",
+  "#40FFC0",
+  "#C040FF",
+  "#FFC040",
+  "#4080FF",
+  "#80FF40",
+  "#FF40A0",
+  "#40A0FF",
+] as const;
+
+/**
+ * Louvre courtyard selfie: keep the couple as subjects, paint each background
+ * person (or tight group) as its own flat color so the crowd slider can hide them.
+ */
+export const CROWD_COLOR_MAP_PROMPT = [
+  "Look at this Louvre courtyard selfie.",
+  "Repaint only these as flat solid colors, one color each, filling each person completely:",
+  "- the man in the foreground (left, sunglasses, hooded jacket)",
+  "- the woman in the foreground (right, peace signs, tan jacket)",
+  "- every separate background tourist / person (or tight pair standing together) in the courtyard behind them — name them person 1, person 2, person 3, … from nearest to farthest",
+  "Do not paint the Louvre pyramid, palace walls, paving, sky, bags on the couple, or anything that is not a person.",
+  `Use only colors from this list that do not already appear in the photo: ${CROWD_COLOR_MAP_PALETTE.join(", ")}.`,
+  "Do not move anyone, change the frame, or invent people.",
+  'After the image, reply with JSON only, no markdown: [{"name":"man","color":"#FF00FF"},{"name":"woman","color":"#00FF00"},{"name":"person 1","color":"#00FFFF"}]',
+  "Use short names: man, woman, person 1, person 2, … Include the exact hex you painted.",
+].join("\n");
+
 export const FACE_COLOR_MAP_PROMPT = [
   "Look at this portrait and repaint only these face regions as flat solid colors. One color per region.",
   "Regions: both under-eye shadows together, the lips, the left cheek, the right cheek, the forehead, and the background behind the person.",

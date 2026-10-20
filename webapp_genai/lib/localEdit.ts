@@ -52,7 +52,21 @@ export type SegmentObject = {
    * user moves / recolors / hides it — otherwise empty-bg punch wipes the object.
    */
   baked?: boolean;
+  /** Louvre crowd: subject = couple (always kept), person = background tourist. */
+  crowdRole?: "subject" | "person";
 };
+
+export function isCrowdPerson(object: SegmentObject) {
+  if (object.crowdRole === "person") return true;
+  if (object.crowdRole === "subject") return false;
+  return /person|people|tourist|visitor|crowd|passer/i.test(object.name);
+}
+
+export function isCrowdSubject(object: SegmentObject) {
+  if (object.crowdRole === "subject") return true;
+  if (object.crowdRole === "person") return false;
+  return /^(man|woman|couple|subject)\b/i.test(object.name);
+}
 
 /** Shade steps used in the sofa/chair color pack (4 shades). */
 export const VARIANT_SHADES = [-2, -1, 0, 1] as const;
@@ -144,7 +158,7 @@ export async function segmentFromGuide(src: string, guide: GuideBox): Promise<Se
 export async function segmentPhoto(
   editorId: string,
   src: string,
-  kind: "objects" | "face" | "room" = "objects",
+  kind: "objects" | "face" | "room" | "crowd" = "objects",
   guide?: GuideBox[]
 ) {
   const blob = await fitImage(await imageBlob(src));
@@ -178,13 +192,22 @@ export async function segmentPhoto(
     dataUrl,
     paintedSrc,
     named,
-    kind === "objects" ? 400 : 80,
-    // Face regions can be split (e.g. both under-eyes). Room furniture must use
-    // the largest blob only — keepAll left speckles that blew up the right-chair box.
-    kind === "face",
-    kind === "room" ? 110 : 58
+    kind === "crowd" ? 220 : kind === "objects" ? 400 : 80,
+    // Face / crowd: keep every blob. Room furniture: largest blob only.
+    kind === "face" || kind === "crowd",
+    kind === "room" ? 110 : 58,
+    kind === "crowd" ? 16 : 8
   );
-  if (byColor.length > 0) return byColor;
+  if (byColor.length > 0) {
+    if (kind === "crowd") {
+      return byColor.map((object) => ({
+        ...object,
+        // Subjects stay; background people are toggled by the crowd slider.
+        crowdRole: /^(man|woman|couple|subject)/i.test(object.name) ? ("subject" as const) : ("person" as const),
+      }));
+    }
+    return byColor;
+  }
   if (guide?.length) return Promise.all(guide.map((item) => segmentFromGuide(src, item)));
   const split = await splitIslands(dataUrl, paintedSrc);
   const painted = await objectsFromPaint(paintedSrc, split.islands, named);
@@ -607,7 +630,31 @@ export async function prepareScene(
   return { objects: lifted, background };
 }
 
-/** Paste fillSrc pixels inside the mask (empty-room background). Falls back to blur. */
+/** Grow a binary mask a few pixels so removal covers fringe / residual edges. */
+function expandMask(mask: HTMLCanvasElement, width: number, height: number, px: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return mask;
+  const grow = Math.max(1, Math.round(px));
+  ctx.filter = `blur(${grow}px)`;
+  ctx.drawImage(mask, 0, 0, width, height);
+  ctx.filter = "none";
+  const image = ctx.getImageData(0, 0, width, height);
+  for (let i = 3; i < image.data.length; i += 4) {
+    // Low threshold after blur → dilated hard edge.
+    const on = image.data[i] >= 24;
+    image.data[i] = on ? 255 : 0;
+    image.data[i - 3] = on ? 255 : 0;
+    image.data[i - 2] = on ? 255 : 0;
+    image.data[i - 1] = on ? 255 : 0;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}
+
+/** Hard-paste empty background pixels inside a slightly expanded mask (no soft edge). */
 function fillVacated(
   ctx: CanvasRenderingContext2D,
   mask: HTMLCanvasElement,
@@ -619,6 +666,9 @@ function fillVacated(
     eraseObject(ctx, mask, width, height);
     return;
   }
+  // ~1.2% of the short side — large enough to clear residual hair/edges, not huge.
+  const grow = Math.max(10, Math.round(Math.min(width, height) * 0.012));
+  const punched = expandMask(mask, width, height, grow);
   const layer = document.createElement("canvas");
   layer.width = width;
   layer.height = height;
@@ -626,7 +676,7 @@ function fillVacated(
   if (!layerCtx) return;
   layerCtx.drawImage(fill, 0, 0, width, height);
   layerCtx.globalCompositeOperation = "destination-in";
-  layerCtx.drawImage(mask, 0, 0);
+  layerCtx.drawImage(punched, 0, 0);
   ctx.drawImage(layer, 0, 0);
 }
 
@@ -735,7 +785,15 @@ export async function renderLocal(
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
-async function segmentsFromColors(originalSrc: string, paintedSrc: string, named: NamedColor[], minArea = 400, keepAll = false, match = 58) {
+async function segmentsFromColors(
+  originalSrc: string,
+  paintedSrc: string,
+  named: NamedColor[],
+  minArea = 400,
+  keepAll = false,
+  match = 58,
+  limit = 8
+) {
   const [original, painted] = await Promise.all([loadImage(originalSrc), loadImage(paintedSrc)]);
   const width = original.naturalWidth;
   const height = original.naturalHeight;
@@ -789,8 +847,26 @@ async function segmentsFromColors(originalSrc: string, paintedSrc: string, named
   }
   return found
     .sort((a, b) => b.area - a.area)
-    .slice(0, 8)
+    .slice(0, Math.max(1, limit))
     .map(({ area: _area, ...object }) => object);
+}
+
+/** Empty Louvre courtyard behind the couple — only background people are removed. */
+export async function generateCrowdBackground(editorId: string, originalSrc: string, people: SegmentObject[]) {
+  const crowd = people.filter(isCrowdPerson);
+  if (crowd.length === 0) return originalSrc;
+  const mask = await unionMask(originalSrc, crowd);
+  if (!mask) return originalSrc;
+  const prompt = [
+    "Remove every background tourist marked in white in the mask, including anyone at the edges of the frame.",
+    "Also remove their shadows on the courtyard paving.",
+    "Keep the man and woman in the foreground selfie completely unchanged — faces, clothes, pose, bags, and their own shadows.",
+    "Fill vacated regions with continuous Louvre courtyard paving and architecture as if those people were never there.",
+    "Keep the Louvre pyramid, palace, sky, framing, lighting, and camera identical.",
+    "Do not add new people, silhouettes, or wire outlines. Return only the couple on an empty courtyard.",
+  ].join(" ");
+  const image = await callEditor(editorId, prompt, originalSrc, mask);
+  return fitEdited(originalSrc, image);
 }
 
 function allPixels(owner: Int16Array, colorIndex: number) {

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { editorChoices, type EditorId } from "@/data/editors";
-import { COLOR_MAP_PROMPT, FACE_COLOR_MAP_PROMPT, ROOM_COLOR_MAP_PROMPT } from "@/lib/colorMapPrompt";
+import {
+  COLOR_MAP_PROMPT,
+  CROWD_COLOR_MAP_PROMPT,
+  FACE_COLOR_MAP_PROMPT,
+  ROOM_COLOR_MAP_PROMPT,
+} from "@/lib/colorMapPrompt";
 import { key } from "@/lib/keys";
 import { runEditor } from "@/lib/runEdit";
 import { MAX_IMAGE_BYTES } from "@/lib/shrink";
@@ -23,7 +28,9 @@ export async function POST(request: Request) {
       ? FACE_COLOR_MAP_PROMPT
       : body?.kind === "room"
         ? ROOM_COLOR_MAP_PROMPT
-        : COLOR_MAP_PROMPT;
+        : body?.kind === "crowd"
+          ? CROWD_COLOR_MAP_PROMPT
+          : COLOR_MAP_PROMPT;
 
   if (!ids.has(editor) || !image) {
     return NextResponse.json({ error: "Choose an editor and a photo." }, { status: 400 });

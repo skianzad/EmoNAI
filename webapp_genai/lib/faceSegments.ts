@@ -1,6 +1,6 @@
 import type { SegmentObject } from "@/lib/localEdit";
 
-export type SegmentKind = "room" | "face";
+export type SegmentKind = "room" | "face" | "crowd";
 
 export type SavedScene = {
   objects: SegmentObject[];
@@ -12,7 +12,11 @@ export async function loadSegments(kind: SegmentKind): Promise<SavedScene | null
   if (!response.ok) return null;
   const body = await response.json().catch(() => ({ objects: [], background: "" }));
   const objects = Array.isArray(body.objects) ? (body.objects as SegmentObject[]) : [];
-  const background = typeof body.background === "string" && body.background.length > 0 ? body.background : null;
+  const background =
+    typeof body.background === "string" && body.background.length > 0
+      ? // Public URLs (/scenes/...) or data URLs both count as a stored empty bg.
+        body.background
+      : null;
   if (objects.length === 0 && !background) return null;
   return { objects, background };
 }
@@ -20,9 +24,15 @@ export async function loadSegments(kind: SegmentKind): Promise<SavedScene | null
 /**
  * Face: persist segments.
  * Room: may create room-segments.json once if missing, and/or save empty background once.
- * Existing room-segments.json is never overwritten (session edits stay in memory).
+ * Crowd: write crowd-segments.json + empty courtyard background (bake once).
+ * Existing room-segments.json is never overwritten by session edits.
  */
-export async function saveSegments(kind: SegmentKind, objects: SegmentObject[], background?: string | null) {
+export async function saveSegments(
+  kind: SegmentKind,
+  objects: SegmentObject[],
+  background?: string | null,
+  options?: { replaceBackground?: boolean }
+) {
   const response = await fetch("/api/segment-cache", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -30,6 +40,7 @@ export async function saveSegments(kind: SegmentKind, objects: SegmentObject[], 
       kind,
       objects,
       background: background || undefined,
+      replaceBackground: Boolean(options?.replaceBackground),
     }),
   });
   const body = await response.json().catch(() => ({ error: "Save failed" }));

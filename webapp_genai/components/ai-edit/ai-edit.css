@@ -507,6 +507,49 @@
   line-height: 1.35;
   color: #8b8e96;
 }
+.ae-crowd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 8px 2px;
+  box-sizing: border-box;
+}
+.ae-crowd-value {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #f2f3f5;
+}
+.ae-crowd-range {
+  width: min(100%, 280px);
+  accent-color: #d4f5ac;
+}
+.ae-crowd-ticks {
+  display: flex;
+  justify-content: space-between;
+  width: min(100%, 280px);
+  gap: 4px;
+}
+.ae-crowd-ticks button {
+  flex: 1;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8b8e96;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.ae-crowd-ticks button.on {
+  background: #ffffff14;
+  color: #d4f5ac;
+}
+.ae-crowd-ticks button:disabled {
+  opacity: 0.45;
+}
 .ae-option-row { display: flex; gap: 9px; align-items: center; justify-content: center; width: 100%; min-width: 0; box-sizing: border-box; }
 .ae-colors, .ae-shades { flex-wrap: nowrap; flex-shrink: 0; }
 .ae-picks {
