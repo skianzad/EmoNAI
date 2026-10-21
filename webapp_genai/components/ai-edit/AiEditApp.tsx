@@ -43,12 +43,15 @@ const STARTER_SHOTS: Shot[] = [
 
 /** Discrete crowd density steps (local hide of saved person segments). */
 const CROWD_LEVELS = [
-  { value: 0, en: "None", zh: "无人" },
-  { value: 1, en: "A few", zh: "少量" },
-  { value: 2, en: "Some", zh: "一些" },
-  { value: 3, en: "Many", zh: "较多" },
-  { value: 4, en: "Full", zh: "满员" },
+  { value: 0, en: "None", zh: "无人", prompt: "Remove all people in the background." },
+  { value: 1, en: "A few", zh: "少量", prompt: "Keep only a few people in the background." },
+  { value: 2, en: "Some", zh: "一些", prompt: "Keep some people in the background." },
+  { value: 3, en: "Many", zh: "较多", prompt: "Keep many people in the background." },
+  { value: 4, en: "Full", zh: "满员", prompt: "" },
 ] as const;
+
+const CROWD_PROMPT_RE =
+  /^(Remove all people in the background|Keep only a few people in the background|Keep some people in the background|Keep many people in the background)\.?$/i;
 
 function editStyle(items: SegmentObject[]): "room" | "face" {
   const names = items.map((object) => object.name.toLowerCase()).join(" ");
@@ -350,8 +353,11 @@ export function AiEditApp() {
    */
   function syncPromptFromEdits(autoLines: string[], names: string[]) {
     const managed = (line: string) => {
+      if (CROWD_PROMPT_RE.test(line)) return true;
       if (/^Make the whole photo (warmer|cooler)\.?$/i.test(line)) return true;
       if (/^Light the subject from the /i.test(line)) return true;
+      // Old crowd dumps: "Remove the person 3." etc.
+      if (/^Remove the (person|tourist|visitor|people)\b/i.test(line)) return true;
       return names.some((name) => {
         const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         return (
@@ -377,6 +383,12 @@ export function AiEditApp() {
   // stay local — they never push lines meant for Nano Banana.
   useEffect(() => {
     if (mode === "photo" || mode === "review" || mode === "voice" || busy) return;
+    // Crowd scene: one short density line — never "Remove the person 1/2/3…".
+    if (source === CROWD) {
+      const step = CROWD_LEVELS.find((item) => item.value === crowdLevel) || CROWD_LEVELS[CROWD_LEVELS.length - 1];
+      syncPromptFromEdits(step.prompt ? [step.prompt] : [], objects.map((object) => object.name).filter(Boolean));
+      return;
+    }
     const items = mode === "retouch" ? (faceLive.current.length ? faceLive.current : faceObjects) : objects;
     const nextLight = mode === "retouch" ? light : undefined;
     const editable = items.filter((object) => {
@@ -390,7 +402,7 @@ export function AiEditApp() {
     const auto = editLines(editable, 0, nextLight);
     const names = items.map((object) => object.name).filter(Boolean);
     syncPromptFromEdits(auto, names);
-  }, [mode, objects, faceObjects, light, eyes, lines, blur, busy]);
+  }, [mode, objects, faceObjects, light, eyes, lines, blur, busy, source, crowdLevel]);
 
   useEffect(() => {
     if (faceObjects.length === 0) return;

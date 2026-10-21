@@ -1,0 +1,29 @@
+Build on Windows → copy to server
+=================================
+
+1) On this Windows machine (Node.js 20+ installed):
+
+   cd webapp-genai-src
+   npm install
+   npm run pack:server
+
+   That creates:
+     deploy\          ← standalone app for the server
+     deploy.zip       ← same thing zipped (if Compress-Archive works)
+
+2) Copy deploy\ or deploy.zip to the Linux server.
+
+3) On the server:
+
+   unzip deploy.zip -d ~/genai-app   # or copy the folder
+   cd ~/genai-app
+   pm2 start ecosystem.config.cjs
+   pm2 save
+
+Server already needs:
+  - Node.js + pm2
+  - ~/HuaweiWebSecureInternetGatewayCAV2_soheil.pem
+  - Proxy 127.0.0.1:3146 (set in ecosystem.config.cjs)
+
+API keys travel with the pack from genai_image_editing\.env
+(copied into deploy as .env.local and genai_image_editing\.env).

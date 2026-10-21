@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "pack:server": "npm run build && node scripts/pack-server.mjs"
   },
   "dependencies": {
     "next": "^15.5.4",
