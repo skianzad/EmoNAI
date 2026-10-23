@@ -33,11 +33,11 @@ const HEART_SVG = `<svg viewBox="0 0 128 120" aria-hidden="true"><defs><radialGr
 const FLOWER_SVG = `<svg viewBox="0 0 140 190" aria-hidden="true"><defs><linearGradient id="stemShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#14532d"/><stop offset="48%" stop-color="#4ade80"/><stop offset="100%" stop-color="#166534"/></linearGradient><radialGradient id="petalBack" cx="38%" cy="28%" r="75%"><stop offset="0%" stop-color="#fda4af"/><stop offset="100%" stop-color="#881337"/></radialGradient><radialGradient id="petalFront" cx="34%" cy="28%" r="78%"><stop offset="0%" stop-color="#fff1f2"/><stop offset="38%" stop-color="#fb7185"/><stop offset="100%" stop-color="#9f1239"/></radialGradient><radialGradient id="leafShade" cx="32%" cy="30%" r="80%"><stop offset="0%" stop-color="#bbf7d0"/><stop offset="100%" stop-color="#166534"/></radialGradient><radialGradient id="roseCore" cx="40%" cy="34%" r="70%"><stop offset="0%" stop-color="#fff7ed"/><stop offset="46%" stop-color="#e11d48"/><stop offset="100%" stop-color="#4c0519"/></radialGradient></defs><ellipse cx="70" cy="180" rx="28" ry="7" fill="rgba(0,0,0,.22)"/><path d="M70 168C66 142 76 114 70 88" fill="none" stroke="url(#stemShade)" stroke-width="9" stroke-linecap="round"/><path d="M70 132C46 120 24 104 18 116c14-2 34 10 52 18z" fill="url(#leafShade)"/><path d="M70 118C98 104 122 92 128 106c-16 0-38 8-58 16z" fill="url(#leafShade)"/><g transform="translate(70 74)"><ellipse rx="20" ry="32" cy="-8" fill="url(#petalBack)" transform="rotate(0)"/><ellipse rx="20" ry="32" cy="-8" fill="url(#petalBack)" transform="rotate(72)"/><ellipse rx="20" ry="32" cy="-8" fill="url(#petalBack)" transform="rotate(144)"/><ellipse rx="16" ry="26" cy="-6" fill="url(#petalFront)" transform="rotate(36)"/><ellipse rx="16" ry="26" cy="-6" fill="url(#petalFront)" transform="rotate(108)"/><ellipse rx="16" ry="26" cy="-6" fill="url(#petalFront)" transform="rotate(180)"/><ellipse rx="11" ry="17" cy="-3" fill="url(#petalFront)" transform="rotate(18)"/><circle r="10" fill="url(#roseCore)"/><ellipse cx="-3" cy="-4" rx="4.5" ry="2.4" fill="#fff" opacity=".75" transform="rotate(-28)"/></g></svg>`;
 const BOMB_SVG = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="40" r="18" fill="#141414"/><circle cx="26" cy="34" r="4" fill="#2c2c2c"/><rect x="29" y="18" width="6" height="8" rx="1.5" fill="#3a3a3a"/><path d="M32 20c10-14 20-6 13 3" fill="none" stroke="#7a4a28" stroke-width="2.5" stroke-linecap="round"/><path d="M45 12l5-6M49 14l7-1M47 18l6 4" stroke="#ffb703" stroke-width="2" stroke-linecap="round"/></svg>`;
 const GEARS = {
-  ball: { id: "ball", label: "Ball", w: 36, h: 36, near: 156, kind: "bounce", src: "/soccer-ball.png" },
+  ball: { id: "ball", label: "Ball", emoji: "⚽", w: 56, h: 56, near: 156, kind: "bounce" },
   // banana: { id: "banana", label: "Banana", w: 128, h: 80, near: 156, kind: "soft", svg: bananaSvg(0) },
-  heart: { id: "heart", label: "Heart", w: 50, h: 47, near: 142, kind: "soft", svg: HEART_SVG },
-  flower: { id: "flower", label: "Flower", w: 48, h: 65, near: 140, kind: "soft", svg: FLOWER_SVG },
-  bomb: { id: "bomb", label: "Bomb", w: 46, h: 46, near: 128, kind: "bomb", svg: BOMB_SVG },
+  heart: { id: "heart", label: "Heart", emoji: "❤️", w: 56, h: 56, near: 148, kind: "soft" },
+  flower: { id: "flower", label: "Flower", emoji: "🌸", w: 56, h: 56, near: 140, kind: "soft" },
+  bomb: { id: "bomb", label: "Bomb", emoji: "💣", w: 56, h: 56, near: 128, kind: "bomb" },
 };
 let gearId = "ball";
 let customGear = null;
@@ -88,18 +88,22 @@ document.getElementById("gear").onclick = (event) => {
   const button = event.target.closest("[data-gear]");
   if (!button || ball.live) return;
   gearId = button.dataset.gear;
+  document.getElementById("emoji-list").hidden = true;
   paintGear();
   setHint();
   if (mode === "play") parkBall();
 };
+document.getElementById("emoji-list").onclick = (event) => {
+  const button = event.target.closest("[data-emoji]");
+  if (!button || ball.live) return;
+  selectEmoji(button.dataset.emoji);
+  document.getElementById("emoji-list").hidden = true;
+};
 document.getElementById("gear-add").onclick = (event) => {
   event.stopPropagation();
-  document.getElementById("gear-file").click();
-};
-document.getElementById("gear-file").onchange = (event) => {
-  const file = event.target.files?.[0];
-  if (file) addGearImage(file);
-  event.target.value = "";
+  if (ball.live) return;
+  const list = document.getElementById("emoji-list");
+  list.hidden = !list.hidden;
 };
 paintGear();
 document.getElementById("load").onclick = () => document.getElementById("file").click();
@@ -353,7 +357,7 @@ function header(head) {
     explode();
     return;
   }
-  if (gear().kind === "soft") return;
+  if (gear().kind === "soft" || gear().kind === "emoji") return;
   hits.push({ t: clock, name: head.name, id: head.id, line: head.line });
   document.getElementById("clip-actions").hidden = false;
   setPose(head.id);
@@ -405,6 +409,59 @@ function explode() {
   document.getElementById("clip-actions").hidden = false;
   clearTimeout(explode.timer);
   explode.timer = setTimeout(() => impact.classList.remove("blast"), 420);
+  disneyExplosion(ball.x + gw() / 2, ball.y + gh() / 2);
+}
+
+function disneyExplosion(cx, cy) {
+  const container = document.getElementById("photo");
+  const colors = ["#ffd23a","#ff6b6b","#4ecdc4","#a8e6cf","#ff8b94","#ffd3b6","#c7f2a4","#ffaaa5","#98ddca","#f9ca24"];
+
+  // Expanding rings
+  for (let i = 0; i < 3; i++) {
+    const ring = document.createElement("div");
+    ring.className = "disney-ring";
+    ring.style.left = `${cx}px`;
+    ring.style.top = `${cy}px`;
+    ring.style.animationDelay = `${i * 80}ms`;
+    ring.style.borderColor = colors[i * 3];
+    container.appendChild(ring);
+    setTimeout(() => ring.remove(), 900 + i * 80);
+  }
+
+  // Colored confetti particles
+  const count = 18;
+  for (let i = 0; i < count; i++) {
+    const angle = (360 / count) * i + Math.random() * 12 - 6;
+    const dist = 55 + Math.random() * 75;
+    const size = 5 + Math.random() * 9;
+    const p = document.createElement("div");
+    p.className = "disney-particle";
+    p.style.cssText = `left:${cx}px;top:${cy}px;width:${size}px;height:${size}px;background:${colors[i % colors.length]};border-radius:${Math.random() > 0.4 ? "50%" : "3px"};--tx:${(Math.cos(angle * Math.PI / 180) * dist).toFixed(1)}px;--ty:${(Math.sin(angle * Math.PI / 180) * dist).toFixed(1)}px;animation-delay:${Math.random() * 60}ms`;
+    container.appendChild(p);
+    setTimeout(() => p.remove(), 1100);
+  }
+
+  // Emoji sparks flying out
+  const sparks = ["⭐","✨","💥","🌟","⚡","💫"];
+  for (let i = 0; i < 6; i++) {
+    const angle = (360 / 6) * i + 30;
+    const dist = 50 + Math.random() * 70;
+    const el = document.createElement("div");
+    el.className = "disney-spark";
+    el.textContent = sparks[i];
+    el.style.cssText = `left:${cx}px;top:${cy}px;--tx:${(Math.cos(angle * Math.PI / 180) * dist).toFixed(1)}px;--ty:${(Math.sin(angle * Math.PI / 180) * dist).toFixed(1)}px;animation-delay:${40 + i * 20}ms`;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 1100);
+  }
+
+  // BOOM! text
+  const boom = document.createElement("div");
+  boom.className = "disney-boom";
+  boom.textContent = "BOOM!";
+  boom.style.left = `${cx}px`;
+  boom.style.top = `${cy - 28}px`;
+  container.appendChild(boom);
+  setTimeout(() => boom.remove(), 900);
 }
 
 function viewerSpot() {
@@ -733,7 +790,7 @@ function drawFrame(ctx, frame) {
 function drawProjectile(ctx, frame) {
   const fade = frame.fade == null ? 1 : frame.fade;
   if (fade <= 0.04) return;
-  const item = frame.gear === "custom" && customGear ? customGear : GEARS[frame.gear] || GEARS.ball;
+  const item = (frame.gear === "emoji" || frame.gear === "custom") && customGear ? customGear : GEARS[frame.gear] || GEARS.ball;
   const z = frame.z || 0;
   const near = item.near || item.w;
   const w = (item.w + (near - item.w) * z) / 2;
@@ -744,8 +801,13 @@ function drawProjectile(ctx, frame) {
   ctx.globalAlpha = fade;
   ctx.translate(cx, cy);
   if (frame.spin) ctx.rotate(((frame.spin || 0) * Math.PI) / 180);
-  const sprite = item.id === "custom" ? sprites.custom : item.id === "ball" ? sprites.ball : null;
-  if (sprite?.complete && sprite.naturalWidth) ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+  const sprite = item.emoji ? null : item.id === "custom" ? sprites.custom : item.id === "ball" ? sprites.ball : null;
+  if (item.emoji) {
+    ctx.font = `${Math.round(Math.min(w, h) * 0.86)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(item.emoji, 0, h * 0.06);
+  } else if (sprite?.complete && sprite.naturalWidth) ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
   else if (item.id === "banana") drawBanana(ctx, w, h, frame.flex || 0);
   else if (item.id === "heart") drawHeart(ctx, w, h);
   else if (item.id === "flower") drawFlower(ctx, w, h);
@@ -864,6 +926,8 @@ function placeBall() {
   ballEl.style.zIndex = ball.z > 0.15 ? "8" : "5";
   ballEl.style.opacity = String(ball.fade == null ? 1 : ball.fade);
   if (gear().id === "banana") ballEl.innerHTML = bananaSvg(ball.flex || 0);
+  const emoji = ballEl.querySelector(".emoji");
+  if (emoji) emoji.style.fontSize = `${size.w * 0.78}px`;
   const pulse = gear().id === "heart" && (ball.live || ball.caught) ? 0.84 + (ball.flex || 0) * 0.36 : 1;
   const spin = ball.spin || 0;
   const pitch = ball.pitch || 0;
@@ -892,7 +956,7 @@ function visualCenter() {
 }
 
 function gear() {
-  return gearId === "custom" && customGear ? customGear : GEARS[gearId] || GEARS.ball;
+  return (gearId === "custom" || gearId === "emoji") && customGear ? customGear : GEARS[gearId] || GEARS.ball;
 }
 
 function gw() {
@@ -908,9 +972,15 @@ function paintGear() {
   for (const button of document.querySelectorAll("#gear [data-gear]")) {
     button.classList.toggle("on", button.dataset.gear === gearId);
   }
-  ballEl.classList.toggle("plain", Boolean(item.svg));
-  ballEl.classList.toggle("round", item.id === "ball");
-  if (item.svg) {
+  ballEl.classList.toggle("plain", Boolean(item.svg || item.emoji));
+  ballEl.classList.toggle("round", item.id === "ball" && !item.emoji);
+  for (const button of document.querySelectorAll("#emoji-list [data-emoji]")) {
+    button.classList.toggle("on", gearId === "emoji" && item.emoji === button.dataset.emoji);
+  }
+  if (item.emoji) {
+    ballEl.innerHTML = `<span class="emoji">${item.emoji}</span>`;
+    ballEl.style.backgroundImage = "none";
+  } else if (item.svg) {
     ballEl.innerHTML = item.svg;
     ballEl.style.backgroundImage = "none";
   } else {
@@ -925,10 +995,23 @@ function setHint() {
     banana: "Tap the banana, then flick. It bends past them.",
     heart: "Tap the heart, then flick it to one of them. His heart pops out.",
     flower: "Tap the flower, then flick it to one of them. He catches it.",
-    bomb: "Tap the bomb, then flick. It pops when it hits.",
+    bomb: "",
     custom: "Tap your image, then flick. It comes from you, then bounces.",
+    emoji: "",
   };
   document.getElementById("play-hint").textContent = hints[gearId] || hints.ball;
+}
+
+function selectEmoji(emoji) {
+  customGear = { id: "emoji", emoji, w: 56, h: 56, near: 148, kind: "emoji" };
+  gearId = "emoji";
+  paintGear();
+  setHint();
+  ball.live = false;
+  ball.flying = false;
+  ball.vx = 0;
+  ball.vy = 0;
+  if (mode === "play") parkBall();
 }
 
 function addGearImage(file) {
