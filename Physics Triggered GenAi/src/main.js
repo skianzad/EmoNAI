@@ -464,6 +464,68 @@ function disneyExplosion(cx, cy) {
   setTimeout(() => boom.remove(), 900);
 }
 
+function disneyHeart(cx, cy) {
+  const container = document.getElementById("photo");
+
+  // Soft pink glow ring
+  for (let i = 0; i < 2; i++) {
+    const ring = document.createElement("div");
+    ring.className = "disney-heart-ring";
+    ring.style.left = `${cx}px`;
+    ring.style.top = `${cy}px`;
+    ring.style.animationDelay = `${i * 120}ms`;
+    container.appendChild(ring);
+    setTimeout(() => ring.remove(), 1000 + i * 120);
+  }
+
+  // Rising hearts
+  const heartEmojis = ["❤️","🩷","💕","💖","💗","💓","❤️","✨"];
+  for (let i = 0; i < 8; i++) {
+    const el = document.createElement("div");
+    el.className = "disney-rising-heart";
+    el.textContent = heartEmojis[i];
+    const spread = (Math.random() - 0.5) * 90;
+    const rise = 60 + Math.random() * 80;
+    el.style.left = `${cx}px`;
+    el.style.top = `${cy}px`;
+    el.style.setProperty("--tx", `${spread.toFixed(1)}px`);
+    el.style.setProperty("--ty", `${-rise.toFixed(1)}px`);
+    el.style.animationDelay = `${i * 70}ms`;
+    el.style.fontSize = `${14 + Math.random() * 12}px`;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 1400 + i * 70);
+  }
+
+  // Pink sparkle particles burst
+  const pinkColors = ["#ff6b9d","#ff9ec4","#ffd6e7","#ff4d6d","#ffb3c6","#ff85a1","#ff4081","#fce4ec"];
+  for (let i = 0; i < 14; i++) {
+    const angle = (360 / 14) * i;
+    const dist = 30 + Math.random() * 50;
+    const size = 4 + Math.random() * 7;
+    const p = document.createElement("div");
+    p.className = "disney-heart-particle";
+    p.style.left = `${cx}px`;
+    p.style.top = `${cy}px`;
+    p.style.width = `${size}px`;
+    p.style.height = `${size}px`;
+    p.style.background = pinkColors[i % pinkColors.length];
+    p.style.setProperty("--tx", `${(Math.cos(angle * Math.PI / 180) * dist).toFixed(1)}px`);
+    p.style.setProperty("--ty", `${(Math.sin(angle * Math.PI / 180) * dist).toFixed(1)}px`);
+    p.style.animationDelay = `${Math.random() * 80}ms`;
+    container.appendChild(p);
+    setTimeout(() => p.remove(), 1000);
+  }
+
+  // "LOVE!" text pop
+  const love = document.createElement("div");
+  love.className = "disney-love";
+  love.textContent = "LOVE! 💕";
+  love.style.left = `${cx}px`;
+  love.style.top = `${cy - 36}px`;
+  container.appendChild(love);
+  setTimeout(() => love.remove(), 1000);
+}
+
 function viewerSpot() {
   const item = gear();
   const visualW = item.near || item.w;
@@ -587,6 +649,7 @@ function glide(dt) {
         ball.tripped = true;
         setPose(head.id === "right" ? "heartRight" : "heartLeft");
         document.getElementById("clip-actions").hidden = false;
+        disneyHeart(chest.x, chest.y);
       }
     }
     if (t >= 1) {
