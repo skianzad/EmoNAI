@@ -1,0 +1,377 @@
+:root {
+  color: #f4f4f5;
+  background: #1a1814;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, #3a352e, #141210 72%);
+}
+
+#phone {
+  height: min(94vh, 900px);
+  aspect-ratio: 390 / 844;
+}
+
+.bezel {
+  height: 100%;
+  padding: 12px;
+  border-radius: 46px;
+  background: #0c0c0e;
+  box-shadow: inset 0 0 0 2px #2c2c30, 0 28px 50px rgba(0, 0, 0, 0.45);
+}
+
+.screen {
+  height: 100%;
+  overflow: hidden;
+  border-radius: 34px;
+  background: #111214;
+  display: grid;
+  place-items: center;
+}
+
+.fit {
+  width: calc(390px * var(--s, 1));
+  height: calc(844px * var(--s, 1));
+}
+
+#sheet {
+  width: 390px;
+  height: 844px;
+  background: #111214;
+  display: flex;
+  flex-direction: column;
+  transform: scale(var(--s, 1));
+  transform-origin: top left;
+}
+
+.bar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+}
+
+.bar-title { display: flex; flex-direction: column; align-items: center; }
+.bar-title b { font-size: 15px; }
+.bar-title span { font-size: 12px; color: #a1a1aa; }
+
+.ibtn {
+  background: none;
+  border: 0;
+  color: #f4f4f5;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+  cursor: pointer;
+}
+
+#photo {
+  position: relative;
+  width: 390px;
+  height: 520px;
+  overflow: hidden;
+  background: #87b4d4;
+  flex-shrink: 0;
+  perspective: 900px;
+}
+
+#scene {
+  width: 390px;
+  height: 520px;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+#ball {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  background: url("/soccer-ball.png") center / contain no-repeat;
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.38));
+  z-index: 5;
+  touch-action: none;
+  transform-style: preserve-3d;
+}
+#ball.round { border-radius: 50%; }
+#ball.round.selected {
+  outline: 3px solid #d4f5ac;
+  outline-offset: 4px;
+}
+#aim {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border: 2px solid #ff9f1c;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(255, 159, 28, 0.35);
+  z-index: 4;
+  pointer-events: none;
+}
+#aim::after {
+  content: "Impact";
+  position: absolute;
+  left: 26px;
+  top: 1px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 3px #000;
+}
+.load-row { display: flex; gap: 8px; }
+.load-row button {
+  border: 0;
+  border-radius: 999px;
+  background: #2c2c2e;
+  color: white;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+#make { background: #0a84ff; }
+#make:disabled { opacity: 0.55; }
+#scene.hop { animation: hop 460ms ease-in-out; }
+@keyframes hop {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-26px); }
+  100% { transform: translateY(0); }
+}
+#ball svg { width: 100%; height: 100%; display: block; pointer-events: none; }
+#ball.plain { background-image: none; }
+#impact.blast {
+  width: 70px;
+  height: 70px;
+  margin: -35px 0 0 -35px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffd166 0%, #e85d04 58%, transparent 72%);
+}
+#impact.blast svg { display: none; }
+.gear {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+.gear button {
+  border: 0;
+  border-radius: 999px;
+  background: #1b1c1f;
+  color: #d4d4d8;
+  font: 600 12px Inter, system-ui, sans-serif;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.gear button.on { background: #d4f5ac; color: #22281b; }
+#sheet[data-mode="play"] .gear,
+#sheet[data-mode="replay"] .gear { padding-bottom: 0; }
+#ball.bonk { animation: squash 220ms ease-out; }
+@keyframes squash {
+  0% { transform: scale(1.12, 0.9); }
+  100% { transform: scale(1); }
+}
+
+#impact {
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+}
+#impact.go { animation: burst 320ms ease-out forwards; }
+#impact svg { width: 52px; height: 52px; overflow: visible; }
+#impact .star { fill: #ffd23a; stroke: #e07a00; stroke-width: 1.5; stroke-linejoin: round; }
+#impact .star.tiny { fill: #fff1a8; }
+@keyframes burst {
+  0% { opacity: 1; transform: scale(0.55); }
+  40% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+
+#react {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 12px;
+  margin: 0;
+  z-index: 6;
+  background: rgba(15, 16, 18, 0.82);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#open-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 8px 16px 18px;
+  background: #111214;
+}
+.browse { display: flex; flex-direction: column; }
+.caption {
+  display: flex;
+  justify-content: space-between;
+  color: #7c7e83;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  margin-bottom: 12px;
+  padding: 0 3px;
+}
+.thumbs {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  min-height: 48px;
+  margin-bottom: 16px;
+}
+.thumb, .add {
+  width: 43px;
+  height: 48px;
+  padding: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: #1b1c1f;
+  cursor: pointer;
+}
+.thumb.active { border-color: #cef0a3; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.add {
+  border: 1px dashed #6d6f74;
+  color: #d4f5ac;
+  font-size: 22px;
+  line-height: 1;
+}
+.feature { display: flex; justify-content: center; gap: 8px; }
+#play, #make {
+  background: #d4f5ac;
+  color: #22281b;
+  border: 0;
+  border-radius: 23px;
+  padding: 12px 22px;
+  font: 650 14px Inter, system-ui, sans-serif;
+  cursor: pointer;
+}
+#make { background: #2c2c2e; color: white; }
+#make:disabled { opacity: 0.55; }
+#moment-copy {
+  min-height: 16px;
+  margin: 0 0 12px;
+  text-align: center;
+  color: #a3a5ab;
+  font-size: 12px;
+}
+#moment-copy:empty { display: none; }
+#sheet[data-mode="open"] #back { visibility: hidden; }
+.bar-title span:empty { display: none; }
+
+.title { font-size: 17px; font-weight: 600; }
+.sub { font-size: 13px; color: #a1a1aa; margin-top: 4px; }
+
+.moments {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #1a1c20;
+  border: 1px solid #2a2d33;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.moments i { width: 10px; height: 10px; border-radius: 50%; background: #f59e0b; flex-shrink: 0; }
+.moments b { display: block; font-size: 14px; }
+.moments span { display: block; font-size: 12px; color: #a1a1aa; margin-top: 2px; }
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  align-items: center;
+}
+
+.tool {
+  background: none;
+  border: 0;
+  color: #d4d4d8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font: 500 11px Inter, system-ui, sans-serif;
+  min-height: 56px;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.play {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  color: #fbbf24;
+  font: 600 11px Inter, system-ui, sans-serif;
+  cursor: pointer;
+}
+.play span {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: #f59e0b;
+  color: #111214;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#play-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 22px;
+}
+#play-bar[hidden] { display: none; }
+#play-hint {
+  margin: 0;
+  flex: 1;
+  font-size: 13px;
+  color: #d4d4d8;
+}
+#clip-actions { display: flex; gap: 8px; }
+#clip-actions[hidden] { display: none; }
+#replay, #save-gif {
+  border: 0;
+  border-radius: 999px;
+  background: #0a84ff;
+  color: white;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 14px;
+}
+#sheet[data-mode="play"] #open-panel,
+#sheet[data-mode="moments"] #open-panel,
+#sheet[data-mode="replay"] #open-panel { display: none; }

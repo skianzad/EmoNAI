@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Physics Triggered GenAI</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="phone">
+      <div class="bezel">
+        <div class="screen">
+          <div class="fit">
+          <div id="sheet" data-mode="open">
+            <header class="bar">
+              <button id="back" class="ibtn" type="button" aria-label="Back">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+              </button>
+              <div class="bar-title"><b id="bar-title">October 22</b><span id="bar-sub"></span></div>
+              <button class="ibtn" type="button" aria-label="More">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg>
+              </button>
+            </header>
+
+            <div id="photo">
+              <img id="scene" src="/friends.png" alt="Two friends by the waterfront" />
+              <div id="aim" hidden></div>
+              <div id="ball" hidden></div>
+              <div id="impact" hidden>
+                <svg viewBox="-40 -40 80 80" aria-hidden="true">
+                  <path class="star" d="M0-16 3-4 16 0 3 4 0 16-3 4-16 0-3-4z"/>
+                  <path class="star tiny" d="M14-12 16-8 20-7 16-5 17-1 13-4 9-3 11-7 8-10 13-10z"/>
+                </svg>
+              </div>
+              <p id="react" hidden></p>
+            </div>
+            <div id="gear" class="gear">
+              <button type="button" class="on" data-gear="ball">Ball</button>
+              <!-- <button type="button" data-gear="banana">Banana</button> -->
+              <button type="button" data-gear="heart">Heart</button>
+              <button type="button" data-gear="flower">Flower</button>
+              <button type="button" data-gear="bomb">Bomb</button>
+              <button type="button" id="gear-add" aria-label="Add an image">+</button>
+              <input id="gear-file" type="file" accept="image/*" hidden />
+            </div>
+
+            <div id="open-panel">
+              <div class="browse">
+                <div class="caption">
+                  <span id="shot-count">1 / 1</span>
+                  <span id="shot-label">Friends</span>
+                </div>
+                <div class="thumbs" id="thumbs">
+                  <button type="button" class="thumb active" data-id="friends" aria-label="Friends"><img src="/friends.png" alt="" /></button>
+                  <button type="button" class="add" id="load" aria-label="Add a photo">+</button>
+                </div>
+                <p id="moment-copy"></p>
+                <div class="feature">
+                  <button id="make" type="button" hidden>Create reaction</button>
+                  <button id="play" type="button">✧ &nbsp; Animate with AI</button>
+                </div>
+                <input id="file" type="file" accept="image/*" hidden />
+              </div>
+            </div>
+            <div id="play-bar" hidden>
+              <p id="play-hint">Flick the ball. It comes from you, shrinks, then bounces.</p>
+              <div id="clip-actions" hidden>
+                <button id="replay" type="button">Replay</button>
+                <button id="save-gif" type="button">Save GIF</button>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
