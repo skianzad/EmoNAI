@@ -35,13 +35,24 @@
               <p id="react" hidden></p>
             </div>
             <div id="gear" class="gear">
-              <button type="button" class="on" data-gear="ball">Ball</button>
+              <button type="button" class="on emoji-gear" data-gear="ball" aria-label="Ball">⚽</button>
               <!-- <button type="button" data-gear="banana">Banana</button> -->
-              <button type="button" data-gear="heart">Heart</button>
-              <button type="button" data-gear="flower">Flower</button>
-              <button type="button" data-gear="bomb">Bomb</button>
-              <button type="button" id="gear-add" aria-label="Add an image">+</button>
-              <input id="gear-file" type="file" accept="image/*" hidden />
+              <button type="button" class="emoji-gear" data-gear="heart" aria-label="Heart">❤️</button>
+              <button type="button" class="emoji-gear" data-gear="flower" aria-label="Flower">🌸</button>
+              <button type="button" class="emoji-gear" data-gear="bomb" aria-label="Bomb">💣</button>
+              <button type="button" id="gear-add" aria-label="More emojis">+</button>
+            </div>
+            <div id="emoji-list" class="emoji-list" hidden aria-label="Emojis">
+              <button type="button" data-emoji="⭐">⭐</button>
+              <button type="button" data-emoji="🔥">🔥</button>
+              <button type="button" data-emoji="🎈">🎈</button>
+              <button type="button" data-emoji="🍕">🍕</button>
+              <button type="button" data-emoji="⚡">⚡</button>
+              <button type="button" data-emoji="🍀">🍀</button>
+              <button type="button" data-emoji="🚀">🚀</button>
+              <button type="button" data-emoji="👻">👻</button>
+              <button type="button" data-emoji="💎">💎</button>
+              <button type="button" data-emoji="🎉">🎉</button>
             </div>
 
             <div id="open-panel">
@@ -57,7 +68,7 @@
                 <p id="moment-copy"></p>
                 <div class="feature">
                   <button id="make" type="button" hidden>Create reaction</button>
-                  <button id="play" type="button">✧ &nbsp; Animate with AI</button>
+                  <button id="play" type="button">✦ &thinsp; Animate with AI</button>
                 </div>
                 <input id="file" type="file" accept="image/*" hidden />
               </div>
@@ -65,8 +76,9 @@
             <div id="play-bar" hidden>
               <p id="play-hint">Flick the ball. It comes from you, shrinks, then bounces.</p>
               <div id="clip-actions" hidden>
-                <button id="replay" type="button">Replay</button>
-                <button id="save-gif" type="button">Save GIF</button>
+                <button id="replay" type="button">↺ Replay</button>
+                <button id="save-gif" type="button">GIF</button>
+                <button id="send-clip" type="button">↑ Send</button>
               </div>
             </div>
           </div>
