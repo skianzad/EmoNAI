@@ -1,6 +1,6 @@
 import type { SegmentObject } from "@/lib/localEdit";
 
-export type SegmentKind = "room" | "face" | "crowd";
+export type SegmentKind = "room" | "face" | "crowd" | "sky";
 
 export type SavedScene = {
   objects: SegmentObject[];

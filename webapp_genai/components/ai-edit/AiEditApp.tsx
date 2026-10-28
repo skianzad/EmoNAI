@@ -26,6 +26,7 @@ import { fitImage, readDataUrl } from "@/lib/shrink";
 import { diffOutside, splitIslands } from "@/lib/splitIslands";
 import type { Island } from "@/data/edits";
 import { uid } from "@/lib/uid";
+import { DESERT, SKY_MASK, SKY_PRESETS, replaceSky, skyObject } from "@/lib/skyReplace";
 import type { EditorChoice } from "../Menu";
 import "./ai-edit.css";
 
@@ -33,9 +34,10 @@ const SCENE = "/scenes/living/armchair.jpg";
 const PORTRAIT = "/scenes/portrait/woman.jpg";
 const CROWD = "/scenes/louvre/crowded.jpg";
 
-type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" | "crowd" };
+type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" | "crowd" | "sky" };
 
 const STARTER_SHOTS: Shot[] = [
+  { id: "sky", src: DESERT, label: "Sky", zh: "天空", kind: "sky" },
   { id: "room", src: SCENE, label: "Living room", zh: "客厅", kind: "room" },
   { id: "crowd", src: CROWD, label: "Louvre crowd", zh: "卢浮宫人群", kind: "crowd" },
   { id: "face", src: PORTRAIT, label: "Portrait", zh: "人像", kind: "face" },
@@ -124,7 +126,18 @@ async function composeChanges(pack: ChangeSet, tintOn: boolean, _fillSrc?: strin
   }
   return canvas.toDataURL("image/jpeg", 0.9);
 }
-type Step = { id: string; label: string; meta: string; objects: SegmentObject[]; warmth: number; shown: boolean };
+type Step = {
+  id: string;
+  label: string;
+  meta: string;
+  objects: SegmentObject[];
+  warmth: number;
+  shown: boolean;
+  time?: string;
+  skyId?: string;
+  skyZoom?: number;
+  crowdLevel?: number;
+};
 type FaceStep = { id: string; label: string; meta: string; objects: SegmentObject[]; eyes: number; lines: number; blur: number; shown: boolean };
 type Palette = "ai" | "warm" | "cool";
 
@@ -184,6 +197,7 @@ const OBJECT_NAMES: Record<string, string> = {
   table: "茶几",
   lamp: "落地灯",
   ladder: "梯子",
+  sky: "天空",
   rug: "地毯",
   paintings: "挂画",
   painting: "挂画",
@@ -207,7 +221,7 @@ function objectName(name: string, zh: boolean) {
 }
 
 export function AiEditApp() {
-  const original = SCENE;
+  const original = DESERT;
   const cache = useRef(new Map<string, SegmentObject[]>());
   const bgCache = useRef(new Map<string, string>());
   const [mode, setMode] = useState<Mode>("photo");
@@ -216,7 +230,7 @@ export function AiEditApp() {
   const workingRef = useRef(original);
   const [photo, setPhoto] = useState(original);
   const [shots, setShots] = useState<Shot[]>(STARTER_SHOTS);
-  const [shotId, setShotId] = useState("room");
+  const [shotId, setShotId] = useState("sky");
   const [objects, setObjects] = useState<SegmentObject[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [warmth, setWarmth] = useState(0);
@@ -245,6 +259,8 @@ export function AiEditApp() {
   const [weathered, setWeathered] = useState(true);
   /** Louvre crowd density: 0 none … 4 full (original). */
   const [crowdLevel, setCrowdLevel] = useState(4);
+  const [skyId, setSkyId] = useState("original");
+  const [skyZoom, setSkyZoom] = useState(1.15);
   const faceCache = useRef<SegmentObject[] | null>(null);
   const [faceSource, setFaceSource] = useState(PORTRAIT);
   const [faceObjects, setFaceObjects] = useState<SegmentObject[]>([]);
@@ -309,6 +325,11 @@ export function AiEditApp() {
         }
       })
       .catch(() => undefined);
+    loadSegments("sky")
+      .then((saved) => {
+        if (saved?.objects.length) cache.current.set(DESERT, structuredClone(saved.objects));
+      })
+      .catch(() => undefined);
     loadSegments("crowd")
       .then((saved) => {
         if (!saved) return;
@@ -329,8 +350,27 @@ export function AiEditApp() {
   }, []);
 
   useEffect(() => {
-    if (mode === "photo" || mode === "retouch" || mode === "review" || mode === "voice" || objects.length === 0) return;
+    if (mode === "photo" || mode === "retouch" || mode === "review" || mode === "voice") return;
     let cancel = false;
+    if (source === DESERT) {
+      const preset = SKY_PRESETS.find((item) => item.id === skyId);
+      if (!preset?.src) {
+        setView(null);
+        return;
+      }
+      const maskSrc = objects.find((object) => /sky/i.test(object.name))?.mask || SKY_MASK;
+      replaceSky(DESERT, maskSrc, preset.src, skyZoom)
+        .then((url) => {
+          if (!cancel) setView(url);
+        })
+        .catch((reason) => {
+          if (!cancel) setError(reason instanceof Error ? reason.message : "Could not update the sky");
+        });
+      return () => {
+        cancel = true;
+      };
+    }
+    if (objects.length === 0) return;
     const empty = bgCache.current.get(source) || null;
     // When None already shows the saved empty courtyard, skip punch (avoids soft ghosts on clean bg).
     const fill = empty && working === empty ? null : empty;
@@ -344,7 +384,7 @@ export function AiEditApp() {
     return () => {
       cancel = true;
     };
-  }, [mode, working, objects, warmth, source, fillTick]);
+  }, [mode, working, objects, warmth, source, fillTick, skyId, skyZoom]);
 
   /**
    * Keep auto edit lines in sync with the current segments (recolor / move / remove).
@@ -544,8 +584,29 @@ export function AiEditApp() {
     };
   }, []);
 
-  function snapshot(next: SegmentObject[], nextWarmth: number, label: string, meta: string) {
-    const step: Step = { id: uid(), label, meta, objects: structuredClone(next), warmth: nextWarmth, shown: true };
+  function stampTime() {
+    return new Date().toLocaleTimeString(zh ? "zh-CN" : "en-US", { hour: "numeric", minute: "2-digit" });
+  }
+
+  function snapshot(
+    next: SegmentObject[],
+    nextWarmth: number,
+    label: string,
+    meta: string,
+    extra?: Pick<Step, "skyId" | "skyZoom" | "crowdLevel">
+  ) {
+    const step: Step = {
+      id: uid(),
+      label,
+      meta,
+      objects: structuredClone(next),
+      warmth: nextWarmth,
+      shown: true,
+      time: stampTime(),
+      skyId: extra?.skyId ?? skyId,
+      skyZoom: extra?.skyZoom ?? skyZoom,
+      crowdLevel: extra?.crowdLevel ?? crowdLevel,
+    };
     const history = [...steps.slice(0, at + 1), step];
     setSteps(history);
     setAt(history.length - 1);
@@ -651,6 +712,71 @@ export function AiEditApp() {
       setBusy(false);
       setSaid("");
     }
+  }
+
+  async function openSky() {
+    setError("");
+    segmentKind.current = "objects";
+    setSource(DESERT);
+    workingRef.current = DESERT;
+    setWorking(DESERT);
+    setPhoto(DESERT);
+    setView(null);
+    setSelected(null);
+    setSkyId("original");
+    setSkyZoom(1.15);
+    setMode("home");
+    const cached = cache.current.get(DESERT);
+    const fallback = [skyObject()];
+    setObjects(cached?.length ? structuredClone(cached) : fallback);
+    setBusy(true);
+    try {
+      const saved = await loadSegments("sky");
+      const next = saved?.objects?.length ? structuredClone(saved.objects) : cached?.length ? structuredClone(cached) : fallback;
+      cache.current.set(DESERT, structuredClone(next));
+      setObjects(next);
+      setSteps([
+        {
+          id: uid(),
+          label: tx("Opened sky edit", "打开天空编辑"),
+          meta: tx("Sky is segmented · pick a replacement and zoom the clouds", "天空已分割 · 选择替换并缩放云层"),
+          objects: structuredClone(next),
+          warmth: 0,
+          shown: true,
+          time: stampTime(),
+          skyId: "original",
+          skyZoom: 1.15,
+        },
+      ]);
+      setAt(0);
+    } catch {
+      setObjects(fallback);
+      setSteps([
+        {
+          id: uid(),
+          label: tx("Opened sky edit", "打开天空编辑"),
+          meta: tx("Sky is segmented · pick a replacement and zoom the clouds", "天空已分割 · 选择替换并缩放云层"),
+          objects: fallback,
+          warmth: 0,
+          shown: true,
+          time: stampTime(),
+          skyId: "original",
+          skyZoom: 1.15,
+        },
+      ]);
+      setAt(0);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function applySky(id: string) {
+    const preset = SKY_PRESETS.find((item) => item.id === id) || SKY_PRESETS[0];
+    setSkyId(preset.id);
+    snapshot(objects, warmth, tx(`Sky · ${preset.label}`, `天空 · ${preset.zh}`), tx("Sky", "天空"), {
+      skyId: preset.id,
+      skyZoom,
+    });
   }
 
   async function openEdit() {
@@ -1041,6 +1167,9 @@ export function AiEditApp() {
     setAt(index);
     setObjects(structuredClone(step.objects));
     setWarmth(step.warmth);
+    if (step.skyId) setSkyId(step.skyId);
+    if (typeof step.skyZoom === "number") setSkyZoom(step.skyZoom);
+    if (typeof step.crowdLevel === "number") setCrowdLevel(step.crowdLevel);
     if (mode === "review" || mode === "voice") setMode("home");
   }
 
@@ -1093,6 +1222,10 @@ export function AiEditApp() {
     setChanges(null);
     setMode("photo");
     if (shot.kind === "crowd") setCrowdLevel(4);
+    if (shot.kind === "sky") {
+      setSkyId("original");
+      setSkyZoom(1.15);
+    }
   }
 
   /**
@@ -1160,6 +1293,10 @@ export function AiEditApp() {
     }
     if (shot.kind === "crowd") {
       await openCrowd(shot.src);
+      return;
+    }
+    if (shot.kind === "sky") {
+      await openSky();
       return;
     }
     if (shot.kind === "room") {
@@ -1539,6 +1676,9 @@ export function AiEditApp() {
         setAt(at - 1);
         setObjects(structuredClone(prior.objects));
         setWarmth(prior.warmth);
+        if (prior.skyId) setSkyId(prior.skyId);
+        if (typeof prior.skyZoom === "number") setSkyZoom(prior.skyZoom);
+        if (typeof prior.crowdLevel === "number") setCrowdLevel(prior.crowdLevel);
       }
       setMode("home");
       return;
@@ -1640,7 +1780,7 @@ export function AiEditApp() {
         onPointerUpCapture={(event) => pointers.current.delete(event.pointerId)}
         onPointerCancelCapture={(event) => pointers.current.delete(event.pointerId)}
       >
-        {editing && mode === "review" ? <div className="ae-tip">{tx("Colored areas are the new edits on the original. Approve to keep them as segments", "彩色区域是叠在原图上的新改动，采用后会变成可编辑的分区")}</div> : editing && mode !== "object" ? <div className="ae-tip">{tx("Tap an object in the photo to edit it", "你可以选择图片中的对象直接编辑")}</div> : null}
+        {editing && mode === "review" ? <div className="ae-tip">{tx("Colored areas are the new edits on the original. Approve to keep them as segments", "彩色区域是叠在原图上的新改动，采用后会变成可编辑的分区")}</div> : editing && source === DESERT ? <div className="ae-tip">{tx("Pick a sky, then zoom to make the clouds bigger or smaller", "选择天空，再用滑块放大或缩小云层")}</div> : editing && mode !== "object" ? <div className="ae-tip">{tx("Tap an object in the photo to edit it", "你可以选择图片中的对象直接编辑")}</div> : null}
         <div
           ref={stageRef}
           className="ae-stage"
@@ -1792,9 +1932,9 @@ export function AiEditApp() {
             const real = steps.length - 1 - index;
             return (
               <div key={step.id} className={real === at ? "ae-step on" : "ae-step"} style={{ opacity: step.shown ? 1 : 0.45 }}>
-                <button type="button" className="ae-step-main" onClick={() => { if (!step.shown) return; setObjects(structuredClone(step.objects)); setWarmth(step.warmth); setAt(real); }}>
+                <button type="button" className="ae-step-main" onClick={() => { if (!step.shown) return; useStep(real); }}>
                   <b>{real + 1}</b>
-                  <span><b>{step.label}</b><br /><span className="ae-muted">{step.meta}</span></span>
+                  <span><b>{step.label}</b><br /><span className="ae-muted">{step.time ? `${step.time} · ${step.meta}` : step.meta}</span></span>
                 </button>
                 <button type="button" className="ae-icon" aria-label={step.shown ? tx("Hide step", "隐藏此步") : tx("Show step", "显示此步")} onClick={() => toggleStep(real)}><Eye open={step.shown} /></button>
                 <button type="button" className="ae-icon" aria-label={tx(`Delete ${step.label}`, `删除${step.label}`)} onClick={() => dropStep(real)}>×</button>
@@ -1814,6 +1954,7 @@ export function AiEditApp() {
             {shots.map((shot) => (
               <button key={shot.id} type="button" className={shot.id === shotId ? "ae-thumb active" : "ae-thumb"} aria-label={tx(shot.label, shot.zh)} onClick={() => selectShot(shot)}>
                 <img src={shot.src} alt="" />
+                <span>{tx(shot.label, shot.zh)}</span>
               </button>
             ))}
             <button type="button" className="ae-add" aria-label={tx("Add a photo", "添加照片")} onClick={() => photoRef.current?.click()}>+</button>
@@ -1868,7 +2009,28 @@ export function AiEditApp() {
         />
       ) : (
         <section className="ae-editor">
-          {source === CROWD && mode !== "review" ? (
+          {source === DESERT && mode !== "review" ? (
+            <div className="ae-examples">
+              <SkyPicker
+                skyId={skyId}
+                zoom={skyZoom}
+                busy={busy}
+                zh={zh}
+                onSky={applySky}
+                onZoom={setSkyZoom}
+                onZoomCommit={(zoom) => {
+                  setSkyZoom(zoom);
+                  if (skyId === "original") return;
+                  const current = steps[at];
+                  if (current?.skyId === skyId && current?.skyZoom === zoom) return;
+                  snapshot(objects, warmth, tx(`Cloud size ${Math.round(zoom * 100)}%`, `云层 ${Math.round(zoom * 100)}%`), tx("Sky", "天空"), {
+                    skyId,
+                    skyZoom: zoom,
+                  });
+                }}
+              />
+            </div>
+          ) : source === CROWD && mode !== "review" ? (
             <div className="ae-examples">
               <CrowdSlider
                 level={crowdLevel}
@@ -2050,9 +2212,9 @@ export function AiEditApp() {
             const real = steps.length - 1 - index;
             return (
               <div key={step.id} className={real === at ? "ae-step on" : "ae-step"} style={{ opacity: step.shown ? 1 : 0.45 }}>
-                <button type="button" className="ae-step-main" onClick={() => { if (!step.shown) return; setObjects(structuredClone(step.objects)); setWarmth(step.warmth); setAt(real); }}>
+                <button type="button" className="ae-step-main" onClick={() => { if (!step.shown) return; useStep(real); }}>
                   <b>{real + 1}</b>
-                  <span><b>{step.label}</b><br /><span className="ae-muted">{step.meta}</span></span>
+                  <span><b>{step.label}</b><br /><span className="ae-muted">{step.time ? `${step.time} · ${step.meta}` : step.meta}</span></span>
                 </button>
                 <button type="button" className="ae-icon" aria-label={step.shown ? tx("Hide step", "隐藏此步") : tx("Show step", "显示此步")} onClick={() => toggleStep(real)}>
                   <Eye open={step.shown} />
@@ -2066,6 +2228,57 @@ export function AiEditApp() {
     </div>
   );
 }
+function SkyPicker(props: {
+  skyId: string;
+  zoom: number;
+  busy: boolean;
+  zh: boolean;
+  onSky: (id: string) => void;
+  onZoom: (zoom: number) => void;
+  onZoomCommit?: (zoom: number) => void;
+}) {
+  return (
+    <div className="ae-skies">
+      <p className="ae-option-title"><span>{props.zh ? "天空" : "Skies"}</span></p>
+      <div className="ae-sky-grid">
+        {SKY_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={props.skyId === preset.id ? "on" : ""}
+            disabled={props.busy}
+            aria-label={props.zh ? preset.zh : preset.label}
+            onClick={() => props.onSky(preset.id)}
+          >
+            <img src={preset.src || DESERT} alt="" />
+          </button>
+        ))}
+      </div>
+      <div className="ae-sky-zoom">
+        <p className="ae-option-title"><span>{props.zh ? "云层大小" : "Cloud size"}</span></p>
+        <p className="ae-crowd-value">{Math.round(props.zoom * 100)}%</p>
+        <input
+          type="range"
+          className="ae-crowd-range"
+          min={1}
+          max={2.4}
+          step={0.05}
+          value={props.zoom}
+          disabled={props.busy || props.skyId === "original"}
+          aria-label={props.zh ? "云层大小" : "Cloud size"}
+          onChange={(event) => props.onZoom(Number(event.target.value))}
+          onPointerUp={(event) => props.onZoomCommit?.(Number((event.target as HTMLInputElement).value))}
+          onKeyUp={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
+              props.onZoomCommit?.(Number((event.target as HTMLInputElement).value));
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function CrowdSlider(props: { level: number; busy: boolean; zh: boolean; onChange: (level: number) => void }) {
   const current = CROWD_LEVELS.find((item) => item.value === props.level) || CROWD_LEVELS[CROWD_LEVELS.length - 1];
   return (

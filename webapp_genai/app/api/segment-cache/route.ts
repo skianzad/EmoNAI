@@ -5,22 +5,24 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-type CacheKind = "room" | "face" | "crowd";
+type CacheKind = "room" | "face" | "crowd" | "sky";
 
 function asKind(value: unknown): CacheKind {
-  if (value === "room" || value === "crowd") return value;
+  if (value === "room" || value === "crowd" || value === "sky") return value;
   return "face";
 }
 
 function segmentsFile(kind: CacheKind) {
   if (kind === "room") return path.join(process.cwd(), "data", "room-segments.json");
   if (kind === "crowd") return path.join(process.cwd(), "data", "crowd-segments.json");
+  if (kind === "sky") return path.join(process.cwd(), "data", "sky-segments.json");
   return path.join(process.cwd(), "data", "face-scene", "meta.json");
 }
 
 function sceneFolder(kind: CacheKind) {
   if (kind === "room") return "room-scene";
   if (kind === "crowd") return "crowd-scene";
+  if (kind === "sky") return "sky-scene";
   return "face-scene";
 }
 
@@ -105,7 +107,7 @@ export async function GET(request: Request) {
       background = await readDataUrl(bgPath, "image/jpeg");
     }
 
-    if (kind === "room" || kind === "crowd") {
+    if (kind === "room" || kind === "crowd" || kind === "sky") {
       try {
         const text = await fs.readFile(segmentsFile(kind), "utf8");
         const saved = JSON.parse(text) as { objects?: Array<Record<string, unknown>> };
@@ -113,6 +115,11 @@ export async function GET(request: Request) {
         const objects = await Promise.all(
           asBaseObjects(listed).map(async (object) => {
             const id = typeof object.id === "string" ? object.id : "";
+            const mask = typeof object.mask === "string" ? object.mask : "";
+            if (kind === "sky" && mask && !mask.startsWith("data:") && !mask.startsWith("/")) {
+              const embedded = await readDataUrl(path.join(process.cwd(), "data", sceneFolder("sky"), mask), "image/png");
+              if (embedded) object.mask = embedded;
+            }
             const layer = id ? await readDataUrl(layerFile(kind, id), "image/png") : "";
             if (layer) object.layer = layer;
             else delete object.layer;
@@ -172,12 +179,12 @@ export async function POST(request: Request) {
     }
   }
 
-  if (kind === "room" || kind === "crowd") {
+  if (kind === "room" || kind === "crowd" || kind === "sky") {
     if (usable.length > 0) {
       const file = segmentsFile(kind);
       await fs.mkdir(path.dirname(file), { recursive: true });
       const incoming = asBaseObjects(usable as Array<Record<string, unknown>>);
-      // Crowd bake replaces the whole set; room merges by name.
+      // Crowd/sky bake replaces the whole set; room merges by name.
       let merged = incoming;
       if (kind === "room" && (await exists(file))) {
         try {

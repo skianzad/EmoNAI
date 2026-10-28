@@ -1,0 +1,25 @@
+{
+  "source": "nano_banana",
+  "kind": "sky",
+  "note": "GenAI binary sky+cloud mask (Nano Banana). Color-map paint also saved as sky-colormap.jpg.",
+  "objects": [
+    {
+      "id": "desert-sky",
+      "name": "sky",
+      "keyColor": "#00FFFF",
+      "tint": null,
+      "shade": 0,
+      "scale": 100,
+      "hidden": false,
+      "dx": 0,
+      "dy": 0,
+      "mask": "/scenes/desert/sky-mask-genai.png",
+      "box": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1.0,
+        "h": 0.557423
+      }
+    }
+  ]
+}
