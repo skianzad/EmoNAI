@@ -33,6 +33,18 @@ function promptFor(x, y) {
   ].join(" ");
 }
 
+function windPrompt() {
+  return [
+    "Edit this real photograph. Keep it photoreal, like an unedited camera still.",
+    "A natural gust of wind from below lifts both people's hair upward.",
+    "Left man: his curly afro is blown taller and slightly back, individual curls lifting in the updraft. Still real hair, not drawn lines.",
+    "Right man: his short hair is ruffled, crown and bangs lifting off the scalp.",
+    "Same two people, same faces, same clothes, same park background, same camera, same framing and poses.",
+    "Clothes may flutter a little at the hems. Expressions stay natural, maybe a slight squint, not slapstick.",
+    "No cartoons, no wind glyphs, no motion lines, no sparkles, no extra people, no text.",
+  ].join(" ");
+}
+
 async function gemini(key, model, image, mime, text) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -48,7 +60,7 @@ async function gemini(key, model, image, mime, text) {
             ],
           },
         ],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.8 },
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"], temperature: 0.55 },
       }),
       signal: AbortSignal.timeout(120_000),
     }
@@ -89,12 +101,14 @@ async function openai(key, model, image, mime, text) {
   return `data:image/png;base64,${encoded}`;
 }
 
-async function createReaction(body) {
+export async function createReaction(body) {
   const keys = env();
-  const text = promptFor(Number(body.x), Number(body.y));
+  const kind = String(body.kind || "impact");
+  const text = kind === "wind" ? windPrompt() : promptFor(Number(body.x), Number(body.y));
   const image = String(body.image || "");
   const mime = String(body.mime || "image/jpeg");
-  if (!image || !Number.isFinite(Number(body.x)) || !Number.isFinite(Number(body.y))) {
+  if (!image) throw new Error("Choose a photo.");
+  if (kind !== "wind" && (!Number.isFinite(Number(body.x)) || !Number.isFinite(Number(body.y)))) {
     throw new Error("Choose a photo and an impact point.");
   }
   if (keys.GEMINI_API_KEY) {

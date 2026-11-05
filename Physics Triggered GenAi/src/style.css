@@ -148,6 +148,86 @@ body {
 #make { background: #0a84ff; }
 #make:disabled { opacity: 0.55; }
 #scene.hop { animation: hop 460ms ease-in-out; }
+#scene.gust { animation: gust-lean 1.2s ease-out; }
+@keyframes gust-lean {
+  0% { transform: none; filter: none; }
+  40% { transform: perspective(900px) rotateX(1.4deg); filter: brightness(1.03); }
+  100% { transform: none; filter: none; }
+}
+#ball.wind-gust {
+  filter: none;
+  mix-blend-mode: screen;
+  pointer-events: auto;
+}
+#ball.wind-gust svg { overflow: visible; }
+.wind-swirl {
+  transform-origin: 130px 200px;
+  animation: wind-flow 2.6s ease-in-out infinite;
+}
+.wisp {
+  stroke-dasharray: 420;
+  stroke-dashoffset: 40;
+  animation: wisp-draw 2.2s ease-in-out infinite;
+}
+.wisp.curl { animation-duration: 2.6s; animation-delay: -0.3s; }
+.wisp.swoosh { animation-duration: 2.4s; animation-delay: -0.7s; }
+.wisp.arc { animation-duration: 2.1s; animation-delay: -1.1s; }
+.wisp.hook { animation-duration: 2.8s; animation-delay: -0.5s; }
+.wisp.fine { animation-duration: 1.9s; animation-delay: -0.2s; }
+.glint, .glint-star {
+  animation: glint-twinkle 1.1s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.glint:nth-child(2), .glint-star.gold { animation-duration: 0.85s; animation-delay: -0.2s; }
+.glint:nth-child(3) { animation-duration: 1.35s; animation-delay: -0.4s; }
+.glint:nth-child(4) { animation-duration: 0.7s; animation-delay: -0.1s; }
+.glint:nth-child(5) { animation-duration: 1.2s; animation-delay: -0.6s; }
+.glint:nth-child(6) { animation-duration: 0.9s; animation-delay: -0.3s; }
+.glint:nth-child(7) { animation-duration: 1.05s; animation-delay: -0.5s; }
+@keyframes wind-flow {
+  0%, 100% { transform: translate(0, 10px) rotate(-6deg) scale(0.96); }
+  50% { transform: translate(8px, -14px) rotate(8deg) scale(1.05); }
+}
+@keyframes wisp-draw {
+  0% { stroke-dashoffset: 380; opacity: 0.15; }
+  38% { stroke-dashoffset: 40; opacity: 0.9; }
+  100% { stroke-dashoffset: -160; opacity: 0.12; }
+}
+@keyframes glint-twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.4); }
+  40% { opacity: 1; transform: scale(1.35); }
+  70% { opacity: 0.55; transform: scale(0.8); }
+}
+#wind-sparkles {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  overflow: hidden;
+}
+.wind-spark {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, #b8fff4 42%, transparent 70%);
+  box-shadow: 0 0 10px 2px rgba(130, 255, 235, 0.75);
+  animation: spark-float 780ms ease-out forwards;
+}
+.wind-spark.gold {
+  background: radial-gradient(circle, #fff 0%, #ffe08a 45%, transparent 70%);
+  box-shadow: 0 0 10px 2px rgba(255, 214, 120, 0.8);
+}
+.wind-spark.star {
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  background: #fff;
+  box-shadow: 0 0 8px 1px rgba(190, 255, 250, 0.9);
+}
+@keyframes spark-float {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.15); opacity: 0; }
+}
 @keyframes hop {
   0% { transform: translateY(0); }
   40% { transform: translateY(-26px); }
@@ -360,6 +440,90 @@ body {
 }
 #sheet[data-mode="play"] .gear,
 #sheet[data-mode="replay"] .gear { padding-bottom: 0; }
+
+#sheet.wallpaper .gear,
+#sheet.wallpaper #emoji-list,
+#sheet.wallpaper #play-bar {
+  display: none;
+}
+#sheet.wallpaper.show-icons::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  background: rgba(150, 178, 206, 0.42);
+}
+#sheet.wallpaper.show-icons .gear {
+  display: flex;
+  position: absolute;
+  z-index: 14;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  padding: 0 16px;
+  gap: 10px;
+  background: none;
+}
+#sheet.wallpaper.show-icons .gear button,
+#sheet.wallpaper.show-icons #gear-add {
+  width: 52px;
+  height: 52px;
+  font-size: 24px;
+  color: #fff;
+  background: #1c1c1e;
+  border: 0;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+#sheet.wallpaper.show-icons .gear button.on {
+  background: #1c1c1e;
+  color: #fff;
+  box-shadow: 0 0 0 3px #c6f08a, 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+#sheet.wallpaper.show-icons #ball {
+  z-index: 13 !important;
+}
+#sheet.wallpaper.show-icons #emoji-list:not([hidden]) {
+  display: flex;
+  position: absolute;
+  z-index: 14;
+  left: 0;
+  right: 0;
+  bottom: 86px;
+}
+#sheet.wallpaper .bar {
+  position: absolute;
+  z-index: 14;
+  left: 0;
+  right: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: none;
+  height: 64px;
+  padding: 10px 12px 0;
+}
+#sheet.wallpaper.show-icons .bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+#sheet.wallpaper.show-icons .bar-title {
+  opacity: 0;
+}
+#sheet.wallpaper.show-icons .bar .ibtn {
+  width: 40px;
+  height: 40px;
+  background: rgba(18, 18, 20, 0.55);
+  backdrop-filter: blur(10px);
+}
+#sheet.wallpaper #photo {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+#sheet.wallpaper #scene {
+  width: 100%;
+  height: 100%;
+}
 #ball.bonk { animation: squash 220ms ease-out; }
 @keyframes squash {
   0% { transform: scale(1.12, 0.9); }
@@ -430,14 +594,14 @@ body {
 }
 .thumbs {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: center;
   align-items: center;
   margin-bottom: 20px;
 }
 .thumb, .add {
-  width: 50px;
-  height: 58px;
+  width: 72px;
+  height: 84px;
   padding: 0;
   border-radius: 9px;
   overflow: hidden;
@@ -500,6 +664,10 @@ body {
 }
 #moment-copy:empty { display: none; }
 #sheet[data-mode="open"] #back { visibility: hidden; }
+#sheet[data-mode="open"] .gear,
+#sheet[data-mode="open"] #emoji-list {
+  display: none;
+}
 .bar-title span:empty { display: none; }
 
 .title { font-size: 17px; font-weight: 600; }

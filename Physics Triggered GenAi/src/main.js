@@ -15,16 +15,65 @@ let heads = [
   { id: "left", name: "Left", x: 146, y: 128, r: 36, line: "Heads it back" },
   { id: "right", name: "Right", x: 252, y: 124, r: 28, line: "Heads it back" },
 ];
-const POSES = {
+const FRIENDS_POSES = {
   base: "/friends.png",
   left: "/friends-left.png",
   right: "/friends-right.png",
   flinch: "/friends-flinch.png",
+  hair: "/friends-hair.png",
   catchLeft: "/friends-catch-left.png",
   catchRight: "/friends-catch-right.png",
   heartLeft: "/friends-heart-left.png",
   heartRight: "/friends-heart-right.png",
 };
+const PARK_POSES = {
+  base: "/park.jpg",
+  flinch: "/park-flinch.jpg",
+  jump: "/park-jump.jpg",
+};
+const POSES = { ...FRIENDS_POSES };
+const WIND_SVG = `<svg class="wind-svg" viewBox="0 0 260 320" aria-hidden="true">
+  <defs>
+    <linearGradient id="wisp" x1="0.15" y1="1" x2="0.85" y2="0">
+      <stop offset="0%" stop-color="#7ff0e0" stop-opacity="0"/>
+      <stop offset="22%" stop-color="#ffe7a3" stop-opacity=".45"/>
+      <stop offset="55%" stop-color="#b8fff4" stop-opacity=".9"/>
+      <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="mist" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="2.1"/>
+    </filter>
+    <filter id="mistSoft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.6"/>
+    </filter>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="1.4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g class="wind-swirl" filter="url(#mistSoft)">
+    <path class="wisp rise" d="M128 308 C 118 250, 112 190, 128 128 C 140 78, 168 36, 198 22" fill="none" stroke="url(#wisp)" stroke-width="22" stroke-linecap="round"/>
+  </g>
+  <g class="wind-swirl" filter="url(#mist)">
+    <path class="wisp curl" d="M86 214 C 64 176, 92 140, 142 132 C 198 122, 214 78, 176 54 C 150 38, 138 62, 162 78" fill="none" stroke="#c5fff6" stroke-width="13" stroke-linecap="round" opacity=".7"/>
+    <path class="wisp swoosh" d="M54 248 C 28 210, 62 176, 118 168 C 176 158, 214 128, 232 92" fill="none" stroke="#ffe7a3" stroke-width="9" stroke-linecap="round" opacity=".55"/>
+    <path class="wisp arc" d="M168 168 C 206 148, 228 118, 236 86 C 244 58, 228 44, 206 52" fill="none" stroke="#9ee7ff" stroke-width="8" stroke-linecap="round" opacity=".55"/>
+    <path class="wisp hook" d="M96 280 C 48 252, 40 210, 78 188 C 122 164, 96 140, 70 156" fill="none" stroke="#d9fff8" stroke-width="10" stroke-linecap="round" opacity=".45"/>
+    <path class="wisp fine" d="M140 296 C 150 230, 136 170, 152 112 C 164 72, 190 40, 214 28" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".8"/>
+  </g>
+  <g class="wind-glints" filter="url(#glow)">
+    <circle class="glint" cx="132" cy="240" r="2.4" fill="#fff"/>
+    <circle class="glint gold" cx="108" cy="188" r="1.8" fill="#ffe08a"/>
+    <circle class="glint" cx="156" cy="152" r="2.8" fill="#e9fffb"/>
+    <circle class="glint gold" cx="178" cy="96" r="2" fill="#fff3c4"/>
+    <circle class="glint" cx="92" cy="128" r="1.6" fill="#fff"/>
+    <circle class="glint" cx="204" cy="64" r="2.2" fill="#b8fff4"/>
+    <circle class="glint gold" cx="70" cy="210" r="1.5" fill="#ffe7a3"/>
+    <circle class="glint" cx="148" cy="72" r="1.4" fill="#fff"/>
+    <path class="glint-star" d="M166 118 l1.6 4.2 4.4.2-3.4 2.8 1.2 4.2-3.8-2.4-3.8 2.4 1.2-4.2-3.4-2.8 4.4-.2z" fill="#fff"/>
+    <path class="glint-star gold" d="M118 164 l1.2 3.2 3.4.2-2.6 2.2.9 3.2-2.9-1.8-2.9 1.8.9-3.2-2.6-2.2 3.4-.2z" fill="#ffe08a"/>
+  </g>
+</svg>`;
 function bananaSvg(flex = 0) {
   const dip = 82 + flex * 16;
   return `<svg viewBox="0 0 160 100" aria-hidden="true"><path d="M26 58 Q 78 ${dip}, 134 32" fill="none" stroke="#f0b400" stroke-width="30" stroke-linecap="round"/><path d="M34 54 Q 76 ${dip - 14}, 120 40" fill="none" stroke="#ffe56a" stroke-width="8" stroke-linecap="round"/><path d="M132 30 Q 148 14, 138 28" fill="none" stroke="#6a3e1b" stroke-width="6" stroke-linecap="round"/></svg>`;
@@ -38,12 +87,13 @@ const GEARS = {
   heart: { id: "heart", label: "Heart", emoji: "❤️", w: 56, h: 56, near: 148, kind: "soft" },
   flower: { id: "flower", label: "Flower", emoji: "🌸", w: 56, h: 56, near: 140, kind: "soft" },
   bomb: { id: "bomb", label: "Bomb", emoji: "💣", w: 56, h: 56, near: 128, kind: "bomb" },
+  wind: { id: "wind", label: "Wind", emoji: "💨", w: 120, h: 168, near: 340, kind: "wind", svg: WIND_SVG },
 };
-let gearId = "ball";
+let gearId = "wind";
 let customGear = null;
 const GROUND = 452;
 const poseImages = {};
-for (const [id, src] of Object.entries(POSES)) {
+for (const [id, src] of Object.entries({ ...FRIENDS_POSES, ...PARK_POSES })) {
   const image = new Image();
   image.src = src;
   poseImages[id] = image;
@@ -61,6 +111,7 @@ const hits = [];
 let headers = 0;
 let drag = null;
 let mode = "open";
+let trayArmed = false;
 let clock = 0;
 let last = performance.now();
 let sampleAt = 0;
@@ -76,8 +127,26 @@ new ResizeObserver(fit).observe(screen);
 
 const shots = [{ id: "friends", label: "Friends" }];
 let shotId = "friends";
+const mic = { stream: null, ctx: null, analyser: null, wave: null, freq: null, source: null, listening: false, coolUntil: 0, smooth: 0, hits: 0 };
+const shake = {
+  bound: false,
+  pointerBound: false,
+  lastX: 0,
+  lastY: 0,
+  lastZ: 0,
+  lastT: 0,
+  pressed: false,
+  mx: 0,
+  my: 0,
+  originX: 0,
+  originY: 0,
+  dir: 0,
+  flips: 0,
+  didReveal: false,
+  hideTimer: 0,
+  flipReset: 0,
+};
 
-document.getElementById("play").onclick = animate;
 document.getElementById("thumbs").onclick = (event) => {
   const thumb = event.target.closest(".thumb");
   if (thumb) selectShot(thumb.dataset.id);
@@ -91,7 +160,23 @@ document.getElementById("gear").onclick = (event) => {
   document.getElementById("emoji-list").hidden = true;
   paintGear();
   setHint();
-  if (mode === "play") parkBall();
+  if (mode === "play") {
+    trayArmed = true;
+    setWallpaper(true);
+    sheet.classList.add("show-icons");
+    clearTimeout(shake.hideTimer);
+    document.getElementById("bar-title").textContent = "";
+    document.getElementById("bar-sub").textContent = "";
+    document.getElementById("play-bar").hidden = true;
+    ballEl.hidden = false;
+    if (gear().kind === "wind") {
+      void listenBlow();
+      launchWind();
+    } else {
+      stopBlow();
+      parkBall();
+    }
+  }
 };
 document.getElementById("emoji-list").onclick = (event) => {
   const button = event.target.closest("[data-emoji]");
@@ -126,31 +211,171 @@ window.addEventListener("pointerup", onUp);
 
 requestAnimationFrame(tick);
 
+function showClipActions() {
+  if (gear().kind === "wind") return;
+  document.getElementById("clip-actions").hidden = false;
+  document.getElementById("play-bar").hidden = false;
+}
+
+function setWallpaper(on) {
+  const was = sheet.classList.contains("wallpaper");
+  sheet.classList.toggle("wallpaper", on);
+  if (!on) {
+    sheet.classList.remove("show-icons");
+    trayArmed = false;
+    return;
+  }
+  if (!was) {
+    sheet.classList.remove("show-icons");
+    shake.pressed = false;
+    shake.flips = 0;
+    shake.didReveal = false;
+    trayArmed = false;
+    ballEl.hidden = true;
+  }
+  document.getElementById("play-bar").hidden = true;
+  document.getElementById("clip-actions").hidden = true;
+  document.getElementById("bar-title").textContent = "";
+  document.getElementById("bar-sub").textContent = "";
+  listenShake();
+}
+
+function revealIcons() {
+  if (!sheet.classList.contains("wallpaper") || mode !== "play") return;
+  if (gear().kind === "wind") void listenBlow();
+  sheet.classList.add("show-icons");
+  if (!trayArmed) ballEl.hidden = true;
+  clearTimeout(shake.hideTimer);
+  if (shake.pressed) return;
+  shake.hideTimer = setTimeout(() => {
+    document.getElementById("emoji-list").hidden = true;
+    sheet.classList.remove("show-icons");
+  }, 4200);
+}
+
+function onDeviceShake(event) {
+  if (!sheet.classList.contains("wallpaper") || mode !== "play") return;
+  const acc = event.accelerationIncludingGravity || event.acceleration;
+  if (!acc) return;
+  const x = acc.x || 0;
+  const y = acc.y || 0;
+  const z = acc.z || 0;
+  const now = performance.now();
+  if (now - shake.lastT < 50) return;
+  const delta = Math.abs(x - shake.lastX) + Math.abs(y - shake.lastY) + Math.abs(z - shake.lastZ);
+  shake.lastX = x;
+  shake.lastY = y;
+  shake.lastZ = z;
+  shake.lastT = now;
+  if (delta > 14) revealIcons();
+}
+
+function onShakePointerDown(event) {
+  if (!sheet.classList.contains("wallpaper") || mode !== "play") return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  shake.pressed = true;
+  shake.didReveal = false;
+  shake.flips = 0;
+  shake.dir = 0;
+  shake.mx = event.clientX;
+  shake.my = event.clientY;
+  shake.originX = event.clientX;
+  shake.originY = event.clientY;
+}
+
+function onPointerShake(event) {
+  if (!sheet.classList.contains("wallpaper") || mode !== "play") return;
+  const mouseHeld = event.pointerType !== "mouse" || shake.pressed || (event.buttons & 1);
+  if (!mouseHeld) return;
+  if (!shake.pressed) {
+    shake.pressed = true;
+    shake.mx = event.clientX;
+    shake.my = event.clientY;
+    shake.originX = event.clientX;
+    shake.originY = event.clientY;
+    return;
+  }
+  const dx = event.clientX - shake.mx;
+  const dy = event.clientY - shake.my;
+  shake.mx = event.clientX;
+  shake.my = event.clientY;
+  const ox = clamp((event.clientX - shake.originX) * 0.12, -18, 18);
+  const oy = clamp((event.clientY - shake.originY) * 0.12, -14, 14);
+  photo.style.transform = `translate(${ox}px, ${oy}px)`;
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+  const dir = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) : Math.sign(dy) * 2;
+  if (dir && dir !== shake.dir) {
+    shake.flips += 1;
+    shake.dir = dir;
+    if (shake.flips >= 3) {
+      shake.didReveal = true;
+      revealIcons();
+    }
+  }
+  clearTimeout(shake.flipReset);
+  shake.flipReset = setTimeout(() => {
+    if (!shake.pressed) shake.flips = 0;
+  }, 500);
+}
+
+function onShakePointerUp() {
+  shake.pressed = false;
+  photo.style.transform = "";
+  if (sheet.classList.contains("show-icons")) revealIcons();
+}
+
+async function listenShake() {
+  if (!shake.pointerBound) {
+    shake.pointerBound = true;
+    photo.addEventListener("pointerdown", onShakePointerDown);
+    window.addEventListener("pointermove", onPointerShake);
+    window.addEventListener("pointerup", onShakePointerUp);
+  }
+  if (shake.bound) return;
+  const bind = () => {
+    window.addEventListener("devicemotion", onDeviceShake);
+    shake.bound = true;
+  };
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+      const status = await DeviceMotionEvent.requestPermission();
+      if (status === "granted") bind();
+    } else {
+      bind();
+    }
+  } catch {
+    bind();
+  }
+}
+
 function showOpen() {
   mode = "open";
   sheet.dataset.mode = "open";
+  setWallpaper(false);
   ball.live = false;
   ball.held = false;
   ballEl.hidden = true;
   reactEl.hidden = true;
   document.getElementById("play-bar").hidden = true;
   document.getElementById("clip-actions").hidden = true;
-  document.getElementById("bar-title").textContent = "October 22";
+  document.getElementById("bar-title").textContent = "Pick a photo";
   document.getElementById("bar-sub").textContent = "";
   setPose("base");
   hideImpact();
+  stopBlow();
 }
 
 function startPlay(reset = true) {
   mode = "play";
   sheet.dataset.mode = "play";
-  document.getElementById("bar-title").textContent = "Animate";
-  document.getElementById("bar-sub").textContent = "From you";
-  document.getElementById("play-bar").hidden = false;
-  ballEl.hidden = false;
+  setWallpaper(true);
+  document.getElementById("bar-title").textContent = "";
+  document.getElementById("bar-sub").textContent = "";
+  document.getElementById("play-bar").hidden = true;
   reactEl.hidden = true;
   if (!reset) {
     ball.live = tape.length > 0;
+    ballEl.hidden = !trayArmed;
     placeBall();
     return;
   }
@@ -165,12 +390,21 @@ function startPlay(reset = true) {
   setPose("base");
   hideImpact();
   parkBall();
+  ballEl.hidden = true;
+  if (gear().kind === "wind") {
+    void listenBlow();
+    void ensureHairPose();
+  }
 }
 
 function onDown(event) {
   const local = photoPoint(event);
-  if (mode === "open" && custom && event.target !== ballEl) {
-    placeAim(local);
+  if (mode === "play" && gear().kind === "wind") {
+    void listenBlow();
+    void listenShake();
+  }
+  if (mode === "open") {
+    startPlay();
     return;
   }
   if (mode !== "play" || ballEl.hidden) return;
@@ -210,6 +444,11 @@ function onUp() {
   ball.held = false;
   drag = null;
   if (speed < 140) {
+    if (gear().kind === "wind") {
+      if (shake.didReveal || shake.flips >= 3) return;
+      launchWind();
+      return;
+    }
     ball.live = false;
     ball.flying = false;
     placeBall();
@@ -242,9 +481,11 @@ function onUp() {
   for (const head of heads) head.touching = false;
   ball.live = true;
   ball.flying = true;
+  ball.z = 1;
   ball.flight = {
     fromX: ball.x,
     fromY: ball.y,
+    fromZ: 1,
     toX: aim.x - gw() / 2,
     toY: aim.y - gh() / 2,
     vx,
@@ -256,6 +497,7 @@ function onUp() {
 function tick(now) {
   const dt = Math.min(0.032, (now - last) / 1000);
   last = now;
+  if (mode === "play" && gear().kind === "wind" && !ball.live && !ball.held) senseBlow(now);
   if (mode === "play" && ball.live && !ball.held) step(dt);
   else if (mode === "replay") replay(dt);
   else if (mode === "play" && ball.caught && gear().id === "heart" && !ball.held) {
@@ -264,7 +506,7 @@ function tick(now) {
     placeBall();
   } else if (mode === "play" && poseUntil && clock < poseUntil + 2) {
     clock += dt;
-    if (clock >= poseUntil) setPose("base");
+    if (clock >= poseUntil) nextPose();
   }
   requestAnimationFrame(tick);
 }
@@ -273,7 +515,7 @@ function step(dt) {
   if (ball.flying) {
     fly(dt);
     clock += dt;
-    if (poseUntil && clock >= poseUntil) setPose("base");
+    if (poseUntil && clock >= poseUntil) nextPose();
     sample();
     placeBall();
     return;
@@ -343,7 +585,7 @@ function step(dt) {
     setPose("flinch");
     poseUntil = Math.max(poseUntil, clock + 0.4);
   } else if (poseUntil && clock >= poseUntil) {
-    setPose("base");
+    nextPose();
   }
   if (clock >= sampleAt) {
     tape.push({ t: clock, x: ball.x, y: ball.y, z: ball.z, spin: ball.spin, fade: ball.fade ?? 1, flex: ball.flex || 0, pitch: ball.pitch || 0, yaw: ball.yaw || 0, gear: gearId, pose });
@@ -359,7 +601,7 @@ function header(head) {
   }
   if (gear().kind === "soft" || gear().kind === "emoji") return;
   hits.push({ t: clock, name: head.name, id: head.id, line: head.line });
-  document.getElementById("clip-actions").hidden = false;
+  showClipActions();
   setPose(head.id);
   poseUntil = clock + 1.2;
   bonk();
@@ -373,7 +615,15 @@ function header(head) {
     ball.live = true;
     ball.vx = 0;
     ball.vy = 0;
-    ball.flight = { fromX: ball.x, fromY: ball.y, toX: back.x, toY: back.y, t: 0 };
+    ball.flight = {
+      fromX: ball.x,
+      fromY: ball.y,
+      fromZ: ball.z,
+      toX: back.x,
+      toY: back.y,
+      toZ: foregroundZ(),
+      t: 0,
+    };
     return;
   }
   const next = heads.find((item) => item.id !== head.id) || head;
@@ -406,7 +656,7 @@ function explode() {
   impact.classList.add("blast");
   bonk();
   shakePhone();
-  document.getElementById("clip-actions").hidden = false;
+  showClipActions();
   clearTimeout(explode.timer);
   explode.timer = setTimeout(() => impact.classList.remove("blast"), 420);
   disneyExplosion(ball.x + gw() / 2, ball.y + gh() / 2);
@@ -526,8 +776,25 @@ function disneyHeart(cx, cy) {
   setTimeout(() => love.remove(), 1000);
 }
 
+function foregroundZ() {
+  const item = gear();
+  const near = item.near || item.w;
+  if (!sheet.classList.contains("wallpaper")) return 1;
+  const target = Math.min(near, 210) * 1.5;
+  return near <= item.w ? 1 : Math.max(1, (target - item.w) / (near - item.w));
+}
+
 function viewerSpot() {
   const item = gear();
+  if (sheet.classList.contains("wallpaper")) {
+    const z = foregroundZ();
+    const near = item.near || item.w;
+    const visualH = item.h + (item.h * (near / item.w) - item.h) * z;
+    return {
+      x: PHOTO_W / 2 - item.w / 2,
+      y: PHOTO_H - visualH / 2 - item.h / 2 - 52,
+    };
+  }
   const visualW = item.near || item.w;
   const visualH = item.h * (visualW / item.w);
   const margin = item.id === "ball" ? 4 : 36;
@@ -558,25 +825,26 @@ function playLob(dt) {
 
 function returnToViewer(dt) {
   const flight = ball.flight;
-  flight.t = Math.min(1, (flight.t || 0) + dt / 0.62);
+  flight.t = Math.min(1, (flight.t || 0) + dt / 0.7);
   const ease = 1 - (1 - flight.t) ** 2;
   const lift = Math.min(flight.fromY, flight.toY) - 64;
   const midX = (flight.fromX + flight.toX) / 2;
   const u = 1 - ease;
+  const fromZ = flight.fromZ ?? 0;
+  const toZ = flight.toZ ?? foregroundZ();
   ball.x = u * u * flight.fromX + 2 * u * ease * midX + ease * ease * flight.toX;
   ball.y = u * u * flight.fromY + 2 * u * ease * lift + ease * ease * flight.toY;
-  ball.z = ease;
+  ball.z = fromZ + (toZ - fromZ) * ease;
+  ball.fade = 1;
   ball.spin += 720 * dt;
   if (flight.t < 1) return;
   ball.returning = false;
   ball.flying = false;
-  ball.z = 1;
-  ball.x = flight.toX;
-  ball.y = flight.toY;
+  ball.live = false;
   ball.vx = 0;
   ball.vy = 0;
-  ball.live = false;
-  ballEl.classList.add("selected");
+  parkBall();
+  ballEl.hidden = false;
   bonk();
 }
 function feetPoint() {
@@ -648,7 +916,7 @@ function glide(dt) {
       if (!ball.tripped && u > 0.16) {
         ball.tripped = true;
         setPose(head.id === "right" ? "heartRight" : "heartLeft");
-        document.getElementById("clip-actions").hidden = false;
+        showClipActions();
         disneyHeart(chest.x, chest.y);
       }
     }
@@ -682,7 +950,7 @@ function glide(dt) {
     if (!ball.tripped && t > 0.58) {
       ball.tripped = true;
       setPose(head.id === "right" ? "catchRight" : "catchLeft");
-      document.getElementById("clip-actions").hidden = false;
+      showClipActions();
     }
     if (t >= 1) {
       ball.live = false;
@@ -711,7 +979,7 @@ function glide(dt) {
     ball.fade = t < 0.86 ? 1 : clamp((1 - t) / 0.14, 0, 1);
     if (!ball.tripped && t > 0.4) {
       ball.tripped = true;
-      document.getElementById("clip-actions").hidden = false;
+      showClipActions();
     }
     if (t >= 1) {
       ball.live = false;
@@ -743,6 +1011,18 @@ function setPose(next) {
   if (!POSES[next] || pose === next) return;
   pose = next;
   document.getElementById("scene").src = POSES[next];
+}
+
+function nextPose() {
+  if (pose === "flinch" && POSES.jump) {
+    setPose("jump");
+    poseUntil = clock + 0.75;
+    document.getElementById("scene").classList.add("hop");
+    return;
+  }
+  document.getElementById("scene").classList.remove("hop", "gust");
+  setPose("base");
+  poseUntil = 0;
 }
 
 function bonk() {
@@ -982,10 +1262,16 @@ function shakePhone() {
 function placeBall() {
   const size = dims();
   const center = visualCenter();
-  ballEl.style.width = `${size.w}px`;
-  ballEl.style.height = `${size.h}px`;
-  ballEl.style.left = `${center.x - size.w / 2}px`;
-  ballEl.style.top = `${center.y - size.h / 2}px`;
+  const boxW = photo.clientWidth || PHOTO_W;
+  const boxH = photo.clientHeight || PHOTO_H;
+  const sx = boxW / PHOTO_W;
+  const sy = boxH / PHOTO_H;
+  const w = size.w * sx;
+  const h = size.h * sx;
+  ballEl.style.width = `${w}px`;
+  ballEl.style.height = `${h}px`;
+  ballEl.style.left = `${center.x * sx - w / 2}px`;
+  ballEl.style.top = `${center.y * sy - h / 2}px`;
   ballEl.style.zIndex = ball.z > 0.15 ? "8" : "5";
   ballEl.style.opacity = String(ball.fade == null ? 1 : ball.fade);
   if (gear().id === "banana") ballEl.innerHTML = bananaSvg(ball.flex || 0);
@@ -995,18 +1281,32 @@ function placeBall() {
   const spin = ball.spin || 0;
   const pitch = ball.pitch || 0;
   const yaw = ball.yaw || 0;
-  if (gear().kind === "soft" || spin || pitch || yaw) {
+  if (gear().kind === "wind") {
+    ballEl.style.transform = "";
+  } else if (gear().kind === "soft" || spin || pitch || yaw) {
     ballEl.style.transform = `rotate(${spin}deg) rotateX(${pitch}deg) rotateY(${yaw}deg) scale(${pulse})`;
   } else if (!ballEl.classList.contains("bonk")) ballEl.style.transform = "";
 }
 
 function dims() {
   const item = gear();
+  if (item.kind === "wind") {
+    const near = 268;
+    const far = 42;
+    const ratio = item.h / item.w;
+    const z = clamp(ball.z, 0, 1.2);
+    return {
+      w: far + (near - far) * z,
+      h: (far + (near - far) * z) * ratio,
+    };
+  }
   const near = item.near || item.w;
   const nearH = item.h * (near / item.w);
+  const far = Math.max(item.w * 2.2, near * 0.72);
+  const farH = item.h * (far / item.w);
   return {
-    w: item.w + (near - item.w) * ball.z,
-    h: item.h + (nearH - item.h) * ball.z,
+    w: far + (near - far) * ball.z,
+    h: farH + (nearH - farH) * ball.z,
   };
 }
 
@@ -1040,11 +1340,12 @@ function paintGear() {
   for (const button of document.querySelectorAll("#emoji-list [data-emoji]")) {
     button.classList.toggle("on", gearId === "emoji" && item.emoji === button.dataset.emoji);
   }
-  if (item.emoji) {
-    ballEl.innerHTML = `<span class="emoji">${item.emoji}</span>`;
-    ballEl.style.backgroundImage = "none";
-  } else if (item.svg) {
+  ballEl.classList.toggle("wind-gust", item.id === "wind");
+  if (item.svg) {
     ballEl.innerHTML = item.svg;
+    ballEl.style.backgroundImage = "none";
+  } else if (item.emoji) {
+    ballEl.innerHTML = `<span class="emoji">${item.emoji}</span>`;
     ballEl.style.backgroundImage = "none";
   } else {
     ballEl.replaceChildren();
@@ -1059,6 +1360,7 @@ function setHint() {
     heart: "Tap the heart, then flick it to one of them. His heart pops out.",
     flower: "Tap the flower, then flick it to one of them. He catches it.",
     bomb: "",
+    wind: "Blow at the phone. The wind comes from you, shrinks into the photo, then they react.",
     custom: "Tap your image, then flick. It comes from you, then bounces.",
     emoji: "",
   };
@@ -1074,7 +1376,12 @@ function selectEmoji(emoji) {
   ball.flying = false;
   ball.vx = 0;
   ball.vy = 0;
-  if (mode === "play") parkBall();
+  if (mode === "play") {
+    trayArmed = true;
+    parkBall();
+    ballEl.hidden = false;
+    sheet.classList.add("show-icons");
+  }
 }
 
 function addGearImage(file) {
@@ -1096,7 +1403,6 @@ function addGearImage(file) {
 
 function parkBall() {
   const item = gear();
-  ball.z = 1;
   ball.flying = false;
   ball.flight = null;
   ball.spin = 0;
@@ -1112,19 +1418,233 @@ function parkBall() {
   ball.returning = false;
   ball.lobbing = false;
   setPose("base");
-  const visualW = item.near || item.w;
-  const visualH = item.h * (visualW / item.w);
-  const margin = item.id === "ball" ? 4 : 36;
-  ball.x = PHOTO_W / 2 - item.w / 2;
-  ball.y = PHOTO_H - visualH / 2 - item.h / 2 - margin;
+  if (sheet.classList.contains("wallpaper")) {
+    const near = item.near || item.w;
+    ball.z = foregroundZ();
+    const visualH = item.h + (item.h * (near / item.w) - item.h) * ball.z;
+    ball.x = PHOTO_W / 2 - item.w / 2;
+    ball.y = PHOTO_H - visualH / 2 - item.h / 2 - 52;
+  } else {
+    ball.z = 1;
+    const visualW = item.near || item.w;
+    const visualH = item.h * (visualW / item.w);
+    const margin = item.id === "ball" ? 4 : 36;
+    ball.x = PHOTO_W / 2 - item.w / 2;
+    ball.y = PHOTO_H - visualH / 2 - item.h / 2 - margin;
+  }
   ball.vx = 0;
   ball.vy = 0;
   ball.live = false;
   ball.held = false;
-  ballEl.hidden = false;
+  ballEl.hidden = sheet.classList.contains("wallpaper") && !trayArmed;
   ballEl.classList.remove("bonk");
   ballEl.classList.add("selected");
   placeBall();
+}
+
+function windAim() {
+  const right = heads.find((head) => head.id === "right");
+  if (right) return { x: right.x + 8, y: right.y - 10 };
+  if (!heads.length) return { x: PHOTO_W / 2, y: PHOTO_H * 0.28 };
+  const x = heads.reduce((sum, head) => sum + head.x, 0) / heads.length;
+  const y = heads.reduce((sum, head) => sum + head.y, 0) / heads.length;
+  return { x, y: y - 8 };
+}
+
+function launchWind(aim) {
+  const target = aim || windAim();
+  headers = 0;
+  for (const head of heads) head.touching = false;
+  const startX = PHOTO_W / 2 - gw() / 2;
+  const startY = PHOTO_H + 36;
+  ball.held = false;
+  ball.live = true;
+  ball.flying = true;
+  ball.fade = 1;
+  ball.tripped = false;
+  ball.spin = 0;
+  ball.x = startX;
+  ball.y = startY;
+  ball.z = 1.12;
+  ball.flight = {
+    fromX: startX,
+    fromY: startY,
+    fromZ: 1.12,
+    toX: target.x - gw() / 2,
+    toY: target.y - gh() / 2,
+    turns: 1.6,
+    amp: 36,
+    vx: 0,
+    vy: -420,
+  };
+  ballEl.hidden = false;
+  ballEl.classList.remove("selected");
+  placeBall();
+  emitWindSparkles(true);
+  mic.coolUntil = performance.now() + 2200;
+}
+
+let sparkAt = 0;
+function emitWindSparkles(burst = false) {
+  const layer = document.getElementById("wind-sparkles");
+  if (!layer) return;
+  const now = performance.now();
+  if (!burst && now - sparkAt < 38) return;
+  sparkAt = now;
+  const center = visualCenter();
+  const boxW = photo.clientWidth || PHOTO_W;
+  const boxH = photo.clientHeight || PHOTO_H;
+  const x = center.x * (boxW / PHOTO_W);
+  const y = center.y * (boxH / PHOTO_H);
+  const depth = clamp(ball.z, 0, 1.3);
+  const scale = 0.28 + depth * 1.2;
+  const count = burst ? 12 : depth > 0.55 ? 4 : 2;
+  for (let i = 0; i < count; i += 1) {
+    const spark = document.createElement("span");
+    const roll = Math.random();
+    spark.className = roll > 0.82 ? "wind-spark star" : roll > 0.55 ? "wind-spark gold" : "wind-spark";
+    const size = (roll > 0.82 ? 7 + Math.random() * 8 : 3 + Math.random() * 7) * scale;
+    spark.style.width = `${size}px`;
+    spark.style.height = `${size}px`;
+    spark.style.left = `${x + (Math.random() - 0.5) * 64 * scale}px`;
+    spark.style.top = `${y + (Math.random() - 0.5) * 48 * scale}px`;
+    spark.style.setProperty("--dx", `${(Math.random() - 0.5) * 40 * scale}px`);
+    spark.style.setProperty("--dy", `${(-10 - Math.random() * 34) * scale}px`);
+    layer.append(spark);
+    setTimeout(() => spark.remove(), 820);
+  }
+}
+
+function windHit() {
+  setPose(POSES.hair ? "hair" : "base");
+  poseUntil = clock + 1.6;
+  document.getElementById("scene").classList.add("gust");
+  shakePhone();
+  showClipActions();
+  void ensureHairPose();
+}
+
+let hairBusy = false;
+async function ensureHairPose() {
+  const ready = poseImages.hair && poseImages.hair.complete && poseImages.hair.naturalWidth;
+  if (ready || hairBusy) return;
+  const src = POSES.base;
+  if (!src) return;
+  hairBusy = true;
+  try {
+    let mime = "image/jpeg";
+    let image = "";
+    if (src.startsWith("data:")) {
+      const match = src.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return;
+      mime = match[1];
+      image = match[2];
+    } else {
+      const blob = await fetch(src).then((res) => res.blob());
+      mime = blob.type || "image/jpeg";
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      image = btoa(binary);
+    }
+    const response = await fetch("/api/react", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "wind", image, mime }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Hair pose failed");
+    POSES.hair = data.image;
+    poseImages.hair = imageFrom(data.image);
+    const shot = shots.find((item) => item.id === shotId);
+    if (shot) shot.hair = data.image;
+  } catch {
+    /* keep the base photo if generation fails */
+  } finally {
+    hairBusy = false;
+  }
+}
+
+async function listenBlow() {
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!mic.ctx) mic.ctx = new AudioCtx();
+    if (mic.ctx.state === "suspended") await mic.ctx.resume();
+    if (!mic.stream) {
+      try {
+        mic.stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        });
+      } catch {
+        mic.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    }
+    if (!mic.analyser) {
+      mic.source = mic.ctx.createMediaStreamSource(mic.stream);
+      mic.analyser = mic.ctx.createAnalyser();
+      mic.analyser.fftSize = 2048;
+      mic.analyser.smoothingTimeConstant = 0.32;
+      mic.source.connect(mic.analyser);
+      mic.wave = new Uint8Array(mic.analyser.fftSize);
+      mic.freq = new Uint8Array(mic.analyser.frequencyBinCount);
+    }
+    mic.listening = true;
+  } catch {
+    mic.listening = false;
+  }
+}
+
+function stopBlow() {
+  mic.listening = false;
+  mic.hits = 0;
+  if (mic.source) {
+    try { mic.source.disconnect(); } catch { /* already disconnected */ }
+    mic.source = null;
+  }
+  if (mic.stream) {
+    for (const track of mic.stream.getTracks()) track.stop();
+    mic.stream = null;
+  }
+  if (mic.ctx) {
+    mic.ctx.close().catch(() => undefined);
+    mic.ctx = null;
+  }
+  mic.analyser = null;
+  mic.wave = null;
+  mic.freq = null;
+}
+
+function senseBlow(now) {
+  if (!mic.analyser || ball.live || ball.held || now < mic.coolUntil) return;
+  if (mic.ctx?.state === "suspended") {
+    void mic.ctx.resume();
+    return;
+  }
+  mic.analyser.getByteTimeDomainData(mic.wave);
+  let sum = 0;
+  for (const sample of mic.wave) {
+    const n = (sample - 128) / 128;
+    sum += n * n;
+  }
+  const rms = Math.sqrt(sum / mic.wave.length);
+  mic.analyser.getByteFrequencyData(mic.freq);
+  let low = 0;
+  const bins = Math.min(20, mic.freq.length);
+  for (let i = 1; i < bins; i += 1) low += mic.freq[i];
+  low /= Math.max(1, bins - 1);
+  mic.smooth = mic.smooth * 0.7 + rms * 0.3;
+  const blowing = mic.smooth > 0.036 && low > 42;
+  if (blowing) {
+    mic.hits += 1;
+    if (mic.hits >= 2) {
+      mic.hits = 0;
+      launchWind();
+    }
+  } else {
+    mic.hits = 0;
+  }
 }
 
 function fly(dt) {
@@ -1137,10 +1657,38 @@ function fly(dt) {
     return;
   }
   const kind = gear().kind;
-  if (kind === "roll") ball.spin += 280 * dt;
-  ball.z = Math.max(0, ball.z - dt / 0.7);
-  const progress = 1 - ball.z ** 1.35;
   const flight = ball.flight;
+  if (kind === "wind") {
+    ball.z = Math.max(0, ball.z - dt / 1.45);
+    const startZ = Math.max(flight.fromZ || ball.z || 1, 0.001);
+    const gust = clamp(1 - ball.z / startZ, 0, 1);
+    const rise = gust * gust * (3 - 2 * gust);
+    const turns = flight.turns || 1.6;
+    const amp = (flight.amp || 36) * (1 - rise * 0.45);
+    const swirl = Math.sin(rise * turns * Math.PI * 2);
+    const wobble = Math.cos(rise * turns * Math.PI * 2) * amp * 0.12;
+    ball.x = flight.fromX + (flight.toX - flight.fromX) * rise + swirl * amp;
+    ball.y = flight.fromY + (flight.toY - flight.fromY) * rise + wobble;
+    ball.spin = 0;
+    ball.fade = ball.z < 0.4 ? clamp(ball.z / 0.4, 0, 1) : 1;
+    emitWindSparkles();
+    if (!ball.tripped && ball.z < 0.32) {
+      ball.tripped = true;
+      windHit();
+    }
+    if (ball.z > 0) return;
+    ball.flying = false;
+    ball.live = false;
+    ball.fade = 0;
+    parkBall();
+    ballEl.hidden = true;
+    return;
+  }
+  if (kind === "roll") ball.spin += 280 * dt;
+  const duration = kind === "bomb" ? 0.3 : 0.34;
+  ball.z = Math.max(0, ball.z - dt / duration);
+  const startZ = Math.max(flight.fromZ || 1, 0.001);
+  const progress = 1 - (ball.z / startZ) ** 0.82;
   ball.x = flight.fromX + (flight.toX - flight.fromX) * progress;
   ball.y = flight.fromY + (flight.toY - flight.fromY) * progress;
   const near = nearestHead();
@@ -1225,44 +1773,42 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function animate() {
-  if (custom && custom.x == null) {
-    setNote("Tap where the ball should hit, then create the reaction.");
-    return;
-  }
-  if (custom && !POSES.spot) {
-    setNote("Create the reaction, then animate.");
-    return;
-  }
-  startPlay();
-}
-
 function setNote(text) {
   document.getElementById("moment-copy").textContent = text;
+}
+
+function setPoses(map) {
+  for (const key of Object.keys(POSES)) delete POSES[key];
+  Object.assign(POSES, map);
+}
+
+function applyFriendsScene() {
+  custom = null;
+  heads = [
+    { id: "left", name: "Left", x: 146, y: 128, r: 36, line: "Heads it back" },
+    { id: "right", name: "Right", x: 252, y: 124, r: 28, line: "Heads it back" },
+  ];
+  setPoses(FRIENDS_POSES);
+  pose = "";
+  setPose("base");
+  document.getElementById("make").hidden = true;
+  setNote("");
 }
 
 function selectShot(id) {
   shotId = id;
   const index = shots.findIndex((shot) => shot.id === id);
   document.getElementById("shot-count").textContent = `${index + 1} / ${shots.length}`;
-  document.getElementById("shot-label").textContent = shots[index]?.label || "";
+  document.getElementById("shot-label").textContent = shots[index]?.label || "Tap a photo to set wallpaper";
   for (const thumb of document.querySelectorAll(".thumb")) {
     thumb.classList.toggle("active", thumb.dataset.id === id);
   }
   document.getElementById("aim").hidden = true;
+  document.getElementById("make").hidden = true;
+  setNote("");
   if (id === "friends") {
-    custom = null;
-    heads = [
-      { id: "left", name: "Left", x: 146, y: 128, r: 36, line: "Heads it back" },
-      { id: "right", name: "Right", x: 252, y: 124, r: 28, line: "Heads it back" },
-    ];
-    POSES.base = "/friends.png";
-    poseImages.base = imageFrom("/friends.png");
-    delete POSES.spot;
-    pose = "";
-    setPose("base");
-    document.getElementById("make").hidden = true;
-    setNote("");
+    applyFriendsScene();
+    startPlay();
     return;
   }
   const shot = shots[index];
@@ -1275,15 +1821,8 @@ function selectShot(id) {
   } else delete POSES.spot;
   pose = "";
   setPose("base");
-  heads = custom.x == null ? [] : [{ id: "spot", name: "Them", x: custom.x * PHOTO_W, y: custom.y * PHOTO_H, r: 26, line: "Funny reaction" }];
-  if (custom.x != null) {
-    const aim = document.getElementById("aim");
-    aim.hidden = false;
-    aim.style.left = `${custom.x * PHOTO_W}px`;
-    aim.style.top = `${custom.y * PHOTO_H}px`;
-  }
-  document.getElementById("make").hidden = custom.x == null;
-  setNote(shot.reaction ? "" : "Tap where the ball should hit, then create the reaction.");
+  heads = [];
+  startPlay();
 }
 function loadPhoto(file) {
   const reader = new FileReader();
@@ -1370,7 +1909,8 @@ async function createReactions() {
     poseImages.spot = imageFrom(data.image);
     const shot = shots.find((item) => item.id === shotId);
     if (shot) shot.reaction = data.image;
-    setNote("Reaction ready. Tap Animate with AI.");
+    setNote("Reaction ready.");
+    startPlay();
   } catch (error) {
     document.getElementById("moment-copy").textContent = error.message;
   }
