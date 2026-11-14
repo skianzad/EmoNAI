@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 520">
+  <!-- White Background -->
+  <rect width="390" height="520" fill="#ffffff"></rect>
+
+  <!-- Background Environment: Tree & Distant Park Elements -->
+  <g id="obj-tree" data-name="Park Tree" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" class="" transform="translate(64.09491235920584 339.64631976766526) rotate(0) scale(0.45426133606809693) translate(-135.45670223236084 -229.770977973938)" data-cx="135.45670223236084" data-cy="229.770977973938" data-tx="-71.361789873155" data-ty="109.87534179372727" data-rot="0" data-scale="0.45426133606809693">
+    <!-- Main Trunk on Left -->
+    <path d="M 58 435 C 55 350 48 260 42 195 C 40 170 34 130 22 95"></path>
+    <path d="M 82 435 C 78 355 72 270 64 210 C 68 180 82 145 98 120"></path>
+    <!-- Overarching Branches -->
+    <path d="M 64 210 C 60 170 52 140 40 115"></path>
+    <path d="M 46 160 C 70 150 110 148 145 130 C 175 115 195 85 210 60"></path>
+    <path d="M 125 138 C 150 145 185 140 215 125"></path>
+    <path d="M 85 130 C 95 105 118 80 145 65"></path>
+    <!-- Foliage Cloud Silhouettes -->
+    <path d="M 18 95 C 8 75 20 45 45 42 C 60 22 95 20 115 35 C 135 18 175 22 188 45 C 215 35 245 55 240 82 C 265 95 260 130 235 142 C 215 155 185 150 175 140"></path>
+    <path d="M 28 85 C 40 70 65 72 75 88"></path>
+    <path d="M 115 48 C 130 35 160 42 165 60"></path>
+    <path d="M 175 75 C 195 65 220 78 218 98"></path>
+  </g>
+
+  <!-- Ground & Pathways -->
+  <g id="obj-ground" data-name="Ground Plane" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" data-cx="195" data-cy="448" data-tx="0" data-ty="0" data-rot="0" data-scale="1">
+    <!-- Main Horizon / Ground Line -->
+    <path d="M 15 435 L 375 435"></path>
+    <!-- Curving Path Edge -->
+    <path d="M 15 468 C 120 460 250 462 375 472"></path>
+    <!-- Ground Texture / Grass Strokes -->
+    <path d="M 40 435 L 43 425"></path>
+    <path d="M 46 435 L 51 427"></path>
+    <path d="M 335 435 L 332 426"></path>
+    <path d="M 340 435 L 344 424"></path>
+    <path d="M 345 435 L 349 427"></path>
+  </g>
+
+  <!-- Park Bench -->
+  <g id="obj-bench" data-name="Park Bench" stroke="#000000" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" fill="none" data-cx="200.3868064880371" data-cy="353" data-tx="53.17193603515625" data-ty="0" data-rot="0" data-scale="1" class="" transform="translate(253.55874252319336 353) rotate(0) scale(1) translate(-200.3868064880371 -353)">
+    <!-- Bench Backrest Slats -->
+    <path d="M 85 275 L 315 275"></path>
+    <path d="M 84 295 L 316 295"></path>
+    <path d="M 83 315 L 317 315"></path>
+    <!-- Bench Seat Slats -->
+    <path d="M 80 342 L 320 342"></path>
+    <path d="M 78 355 L 322 355"></path>
+    <path d="M 76 368 L 324 368"></path>
+
+    <!-- Left Armrest and Support Structure -->
+    <path d="M 98 268 C 90 268 85 275 85 285 L 82 340"></path>
+    <path d="M 80 325 C 75 325 72 332 75 342 L 86 342"></path>
+    <!-- Left Front Leg -->
+    <path d="M 85 365 C 84 390 82 415 80 435"></path>
+    <path d="M 80 435 C 76 435 75 438 82 438 C 88 438 88 435 85 435"></path>
+    <!-- Left Rear Leg -->
+    <path d="M 92 355 C 96 385 104 415 108 435"></path>
+
+    <!-- Right Armrest and Support Structure -->
+    <path d="M 302 268 C 310 268 315 275 315 285 L 318 340"></path>
+    <path d="M 320 325 C 325 325 328 332 325 342 L 314 342"></path>
+    <!-- Right Front Leg -->
+    <path d="M 315 365 C 316 390 318 415 320 435"></path>
+    <path d="M 320 435 C 316 435 315 438 322 438 C 328 438 328 435 325 435"></path>
+    <!-- Right Rear Leg -->
+    <path d="M 308 355 C 304 385 296 415 292 435"></path>
+  </g>
+
+  <!-- Seated Man -->
+  <g id="obj-man" data-name="Reading Man" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" class="" transform="translate(241.116216199431 274.6198558198099) rotate(0) scale(1) translate(-196.90943145751953 -286.5490417480469)" data-cx="196.90943145751953" data-cy="286.5490417480469" data-tx="44.20678474191145" data-ty="-11.92918592823694" data-rot="0" data-scale="1">
+    <!-- Flat Cap -->
+    <path d="M 182 148 C 185 138 200 134 216 136 C 228 138 235 145 236 153 C 230 154 218 153 206 152 C 194 151 186 150 182 148 Z"></path>
+    <path d="M 182 148 C 172 150 168 153 172 156 C 180 156 195 153 210 153"></path>
+    
+    <!-- Head / Face Profile tilted down -->
+    <path d="M 194 152 C 190 156 188 162 188 166"></path>
+    <path d="M 188 166 C 185 168 184 172 186 174 C 188 175 190 173 191 170"></path> <!-- Ear -->
+    <path d="M 185 168 L 181 175 L 184 177"></path> <!-- Nose silhouette edge -->
+    <path d="M 186 178 C 189 184 195 186 200 186"></path> <!-- Chin/Jawline -->
+    
+    <!-- Collar & Neck -->
+    <path d="M 196 186 L 198 196"></path>
+    <path d="M 188 182 L 186 196"></path>
+    <path d="M 184 196 L 194 202 L 204 195"></path>
+
+    <!-- Upper Body & Jacket Shoulders -->
+    <path d="M 184 198 C 168 204 154 218 146 238 L 140 270"></path> <!-- Left arm/shoulder -->
+    <path d="M 204 196 C 220 202 238 215 248 236 L 254 270"></path> <!-- Right arm/shoulder -->
+
+    <!-- Hands Grasping Newspaper -->
+    <!-- Left Hand -->
+    <path d="M 136 270 C 134 274 135 282 140 284 C 143 280 144 274 142 268"></path>
+    <path d="M 140 274 C 144 274 146 278 144 282"></path>
+    <!-- Right Hand -->
+    <path d="M 258 268 C 260 274 258 282 254 284 C 250 280 249 274 252 268"></path>
+    <path d="M 253 274 C 250 274 248 278 250 282"></path>
+
+    <!-- Lower Torso & Coat Sides -->
+    <path d="M 152 310 L 150 352"></path>
+    <path d="M 242 310 L 246 352"></path>
+
+    <!-- Crossed Legs: Right leg over Left leg -->
+    <!-- Waist / Pelvis -->
+    <path d="M 150 352 C 160 348 230 348 244 352"></path>
+    <!-- Upper (Right) Leg crossing over -->
+    <path d="M 182 348 C 186 355 190 365 204 366 C 220 367 236 364 245 360"></path>
+    <path d="M 245 360 C 248 375 236 405 228 420"></path> <!-- Lower right leg hanging -->
+    <path d="M 235 365 C 230 388 222 410 216 422"></path>
+    <!-- Right Shoe -->
+    <path d="M 216 422 C 214 425 218 432 225 434 C 234 436 242 432 240 426 C 236 422 230 420 228 420 Z"></path>
+
+    <!-- Lower (Left) Leg supporting down to ground -->
+    <path d="M 166 354 C 168 375 168 400 166 428"></path>
+    <path d="M 182 366 C 184 388 184 410 182 430"></path>
+    <!-- Left Shoe firmly on ground -->
+    <path d="M 164 428 C 160 430 156 434 160 437 C 168 438 184 438 188 435 C 188 432 184 430 182 430 Z"></path>
+
+    <!-- Trousers Creases -->
+    <path d="M 172 380 C 176 384 175 395 170 405"></path>
+    <path d="M 228 378 C 224 388 226 398 222 408"></path>
+  </g>
+
+  <!-- Folded Newspaper Held Open -->
+  <g id="obj-newspaper" data-name="Newspaper" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" class="" data-cx="197.00000762939453" data-cy="271.0342559814453" data-tx="47.556793212890625" data-ty="-0.3196563720703125" data-rot="0" data-scale="1" transform="translate(244.55680084228516 270.714599609375) rotate(0) scale(1) translate(-197.00000762939453 -271.0342559814453)">
+    <!-- Center Crease/Spine -->
+    <path d="M 197 212 L 197 325"></path>
+
+    <!-- Left Page Outline (Bent in perspective) -->
+    <path d="M 197 212 C 180 208 152 210 134 220 L 138 332 C 158 322 180 322 197 325 Z"></path>
+    <!-- Right Page Outline (Bent in perspective) -->
+    <path d="M 197 212 C 214 208 242 210 260 220 L 256 332 C 236 322 214 322 197 325 Z"></path>
+
+    <!-- Newspaper Inner Structure: Headline & Column Blocks (Geometric Sketch Lines) -->
+    <!-- Left Page Layout Lines -->
+    <path d="M 145 234 C 160 228 175 226 188 228"></path>
+    <path d="M 144 244 L 162 241 L 163 305 L 146 312 Z"></path>
+    <path d="M 170 240 L 188 238 L 189 302 L 171 304 Z"></path>
+
+    <!-- Right Page Layout Lines -->
+    <path d="M 206 228 C 218 226 235 228 249 234"></path>
+    <path d="M 205 238 L 223 240 L 222 304 L 204 302 Z"></path>
+    <path d="M 231 241 L 249 244 L 247 312 L 230 305 Z"></path>
+
+    <!-- Slight Page Flare / Thickness -->
+    <path d="M 134 220 C 132 222 133 226 135 227"></path>
+    <path d="M 260 220 C 262 222 261 226 259 227"></path>
+  </g>
+
+  <!-- Park Pigeon on the Ground -->
+  <g id="obj-pigeon" data-name="Pigeon" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" class="" transform="translate(279.53578289528224 184.89597335675214) rotate(0) scale(1) translate(-287 -432.3563690185547)" data-cx="287" data-cy="432.3563690185547" data-tx="-7.464217104717756" data-ty="-247.46039566180255" data-rot="0" data-scale="1">
+    <!-- Body & Head pecking right -->
+    <path d="M 288 426 C 283 421 275 422 272 427 C 270 432 274 437 282 437 C 288 437 294 434 298 430"></path>
+    <path d="M 296 428 C 298 426 303 425 306 428 L 310 429 L 306 431 Z"></path> <!-- Beak and head -->
+    <!-- Wing -->
+    <path d="M 275 427 C 280 427 288 431 292 434"></path>
+    <!-- Tail -->
+    <path d="M 272 427 L 264 428 L 268 432 Z"></path>
+    <!-- Feet -->
+    <path d="M 282 437 L 280 442"></path>
+    <path d="M 286 437 L 286 442"></path>
+  </g>
+</svg>

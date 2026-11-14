@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sketch Director</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="phone">
+      <div class="bezel">
+        <div class="screen">
+          <div class="fit">
+            <div id="sheet" data-mode="open">
+              <header class="bar">
+                <button id="back" class="ibtn" type="button" aria-label="Back">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+                </button>
+                <div class="bar-title"><b id="bar-title">Pick a photo</b><span id="bar-sub"></span></div>
+                <button class="ibtn" type="button" aria-label="More">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg>
+                </button>
+              </header>
+
+              <div id="photo">
+                <img id="photo-under" alt="" hidden />
+                <div id="stage" class="stage">
+                  <p id="empty">Choose a photo, or start empty.</p>
+                </div>
+                <div id="gizmo" hidden>
+                  <div class="gizmo-box">
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="nw" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="ne" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="sw" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="se" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-rot" data-op="rotate" aria-label="Rotate"></button>
+                  </div>
+                </div>
+                <img id="photo-out" alt="Nano Banana photograph" hidden />
+                <div id="edit-bar" hidden>
+                  <button type="button" id="undo" disabled>Undo</button>
+                  <button type="button" id="redo" disabled>Redo</button>
+                  <button type="button" id="delete-obj" disabled>Delete</button>
+                </div>
+                <div id="busy" hidden>
+                  <span class="spin"></span>
+                  <p id="busy-copy">Sketching</p>
+                </div>
+              </div>
+
+              <div id="open-panel">
+                <div id="picker" class="browse">
+                  <div class="caption">
+                    <span id="shot-count">Recents</span>
+                    <span id="shot-label">Photo or empty</span>
+                  </div>
+                  <div class="thumbs" id="thumbs"></div>
+                </div>
+                <div id="work" class="browse">
+                  <textarea id="prompt" rows="2" maxlength="280" placeholder="Describe the scene, or the edit."></textarea>
+                  <div class="feature">
+                    <button id="sketch" type="button">Sketch</button>
+                    <button id="banana" type="button" disabled>Nano Banana</button>
+                  </div>
+                </div>
+              </div>
+              <input id="file" type="file" accept="image/*" hidden />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

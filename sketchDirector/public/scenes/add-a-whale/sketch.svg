@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 520" width="390" height="520">
+  <g id="obj-whale" data-name="whale" stroke="#1a2610" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" data-cx="222.5" data-cy="398.41050720214844" data-tx="62.27301025390625" data-ty="-3.511688232421875" data-rot="27.625213637327274" data-scale="0.9089928036926205" class="" transform="translate(284.77301025390625 394.89881896972656) rotate(27.625213637327274) scale(0.9089928036926205) translate(-222.5 -398.41050720214844)">
+    <!-- Whale Body breaching or surfacing in foreground water -->
+    <!-- Head / Snout emerging from waves on the left -->
+    <path d="M 55 435 C 70 395 105 375 145 370 C 185 365 230 380 270 415 C 295 440 315 470 330 495"></path>
+    <!-- Lower jaw / throat grooves -->
+    <path d="M 55 435 C 75 450 110 465 155 465 C 195 465 240 450 270 415"></path>
+    <path d="M 70 443 C 95 456 130 463 165 462"></path>
+    <path d="M 85 450 C 110 462 145 464 175 460"></path>
+    <path d="M 105 458 C 130 465 160 465 185 458"></path>
+
+    <!-- Whale eye -->
+    <circle cx="112" cy="418" r="2.5"></circle>
+    <path d="M 106 414 C 112 411 118 412 122 416"></path>
+
+    <!-- Mouth line / baleen crease -->
+    <path d="M 58 433 C 85 425 120 424 140 435"></path>
+
+    <!-- Blowhole area & Spout -->
+    <path d="M 135 372 C 142 368 152 368 158 372"></path>
+    <!-- Water spout/spray -->
+    <path d="M 145 368 C 142 345 130 320 115 305 M 145 345 C 135 330 110 325 95 330"></path>
+    <path d="M 148 368 C 150 338 152 305 150 285 M 150 315 C 155 295 165 280 180 282"></path>
+    <path d="M 152 368 C 158 340 172 315 190 300 M 160 335 C 175 325 195 325 210 335"></path>
+
+    <!-- Dorsal Fin -->
+    <path d="M 235 382 C 248 360 258 355 268 362 C 265 372 260 385 258 395"></path>
+
+    <!-- Pectoral Flipper -->
+    <path d="M 160 440 C 185 470 205 505 210 515 C 205 515 188 495 172 468 C 165 456 160 447 158 442"></path>
+
+    <!-- Whale Tail / Fluke lifting out of the water behind/right -->
+    <path d="M 290 445 C 305 420 325 390 335 370"></path>
+    <path d="M 315 455 C 328 425 342 395 345 372"></path>
+    <!-- Flukes -->
+    <path d="M 335 370 C 325 350 300 342 275 345 C 295 360 320 368 340 372 C 360 368 385 360 405 345 C 380 342 355 350 345 372"></path>
+    <path d="M 340 371 L 340 375"></path>
+
+    <!-- Water splash / disturbance around the whale -->
+    <path d="M 40 442 C 55 435 68 445 80 440 C 95 432 105 445 120 440"></path>
+    <path d="M 255 420 C 270 410 285 425 305 422 C 320 420 335 435 350 430"></path>
+    <path d="M 130 475 C 150 470 175 480 200 472 C 220 468 245 475 260 470"></path>
+    <path d="M 80 460 C 95 465 110 475 130 472"></path>
+  </g>
+</svg>
