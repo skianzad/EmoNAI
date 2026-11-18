@@ -27,6 +27,7 @@ import { diffOutside, splitIslands } from "@/lib/splitIslands";
 import type { Island } from "@/data/edits";
 import { uid } from "@/lib/uid";
 import { DESERT, SKY_MASK, SKY_PRESETS, replaceSky, skyObject } from "@/lib/skyReplace";
+import { LOOK_BACKGROUNDS, LOOK_COATS, PROFESSIONAL, applyProfessionalLook } from "@/lib/professionalLook";
 import type { EditorChoice } from "../Menu";
 import "./ai-edit.css";
 
@@ -34,13 +35,19 @@ const SCENE = "/scenes/living/armchair.jpg";
 const PORTRAIT = "/scenes/portrait/woman.jpg";
 const CROWD = "/scenes/louvre/crowded.jpg";
 
-type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" | "crowd" | "sky" };
+type Shot = { id: string; src: string; label: string; zh: string; kind: "room" | "face" | "new" | "crowd" | "sky" | "pro" };
 
-const STARTER_SHOTS: Shot[] = [
-  { id: "sky", src: DESERT, label: "Sky", zh: "天空", kind: "sky" },
+export type EditPack = "islands" | "controls";
+
+const ISLAND_SHOTS: Shot[] = [
   { id: "room", src: SCENE, label: "Living room", zh: "客厅", kind: "room" },
-  { id: "crowd", src: CROWD, label: "Louvre crowd", zh: "卢浮宫人群", kind: "crowd" },
   { id: "face", src: PORTRAIT, label: "Portrait", zh: "人像", kind: "face" },
+];
+
+const CONTROL_SHOTS: Shot[] = [
+  { id: "sky", src: DESERT, label: "Sky", zh: "天空", kind: "sky" },
+  { id: "crowd", src: CROWD, label: "Crowd", zh: "人群", kind: "crowd" },
+  { id: "pro", src: PROFESSIONAL, label: "Professional", zh: "正装", kind: "pro" },
 ];
 
 /** Discrete crowd density steps (local hide of saved person segments). */
@@ -137,6 +144,8 @@ type Step = {
   skyId?: string;
   skyZoom?: number;
   crowdLevel?: number;
+  lookBg?: string;
+  lookCoat?: string;
 };
 type FaceStep = { id: string; label: string; meta: string; objects: SegmentObject[]; eyes: number; lines: number; blur: number; shown: boolean };
 type Palette = "ai" | "warm" | "cool";
@@ -220,8 +229,9 @@ function objectName(name: string, zh: boolean) {
   return OBJECT_NAMES[name.toLowerCase()] ?? name;
 }
 
-export function AiEditApp() {
-  const original = DESERT;
+export function AiEditApp({ pack = "islands" }: { pack?: EditPack }) {
+  const starters = pack === "controls" ? CONTROL_SHOTS : ISLAND_SHOTS;
+  const original = starters[0].src;
   const cache = useRef(new Map<string, SegmentObject[]>());
   const bgCache = useRef(new Map<string, string>());
   const [mode, setMode] = useState<Mode>("photo");
@@ -229,8 +239,8 @@ export function AiEditApp() {
   const [working, setWorking] = useState(original);
   const workingRef = useRef(original);
   const [photo, setPhoto] = useState(original);
-  const [shots, setShots] = useState<Shot[]>(STARTER_SHOTS);
-  const [shotId, setShotId] = useState("sky");
+  const [shots, setShots] = useState<Shot[]>(starters);
+  const [shotId, setShotId] = useState(starters[0].id);
   const [objects, setObjects] = useState<SegmentObject[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [warmth, setWarmth] = useState(0);
@@ -261,6 +271,8 @@ export function AiEditApp() {
   const [crowdLevel, setCrowdLevel] = useState(4);
   const [skyId, setSkyId] = useState("original");
   const [skyZoom, setSkyZoom] = useState(1.15);
+  const [lookBg, setLookBg] = useState("original");
+  const [lookCoat, setLookCoat] = useState("original");
   const faceCache = useRef<SegmentObject[] | null>(null);
   const [faceSource, setFaceSource] = useState(PORTRAIT);
   const [faceObjects, setFaceObjects] = useState<SegmentObject[]>([]);
@@ -282,6 +294,10 @@ export function AiEditApp() {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const boundsRef = useRef<HTMLCanvasElement>(null);
+  const peekTimer = useRef(0);
+  const peekOrigin = useRef<{ x: number; y: number } | null>(null);
+  const [peek, setPeek] = useState(false);
   const maskBits = useRef(new Map<string, { width: number; height: number; alpha: Uint8ClampedArray }>());
   const segmentKind = useRef<"objects" | "face" | "room">("room");
   const zoomRef = useRef({ scale: 1, x: 0, y: 0 });
@@ -310,34 +326,38 @@ export function AiEditApp() {
   }, [objects, selected, mode]);
 
   useEffect(() => {
-    loadSegments("face")
-      .then((saved) => {
-        if (saved && !faceCache.current) faceCache.current = structuredClone(saved.objects);
-      })
-      .catch(() => undefined);
-    loadSegments("room")
-      .then((saved) => {
-        if (!saved) return;
-        if (saved.background) bgCache.current.set(SCENE, saved.background);
-        // Always load the saved base masks (from room-segments.json). Session edits are not on disk.
-        if (saved.objects.length) {
-          cache.current.set(SCENE, resetRoomEdits(saved.objects));
-        }
-      })
-      .catch(() => undefined);
-    loadSegments("sky")
-      .then((saved) => {
-        if (saved?.objects.length) cache.current.set(DESERT, structuredClone(saved.objects));
-      })
-      .catch(() => undefined);
-    loadSegments("crowd")
-      .then((saved) => {
-        if (!saved) return;
-        if (saved.background) bgCache.current.set(CROWD, saved.background);
-        if (saved.objects.length) cache.current.set(CROWD, structuredClone(saved.objects));
-      })
-      .catch(() => undefined);
-  }, []);
+    if (pack !== "controls") {
+      loadSegments("face")
+        .then((saved) => {
+          if (saved && !faceCache.current) faceCache.current = structuredClone(saved.objects);
+        })
+        .catch(() => undefined);
+      loadSegments("room")
+        .then((saved) => {
+          if (!saved) return;
+          if (saved.background) bgCache.current.set(SCENE, saved.background);
+          // Always load the saved base masks (from room-segments.json). Session edits are not on disk.
+          if (saved.objects.length) {
+            cache.current.set(SCENE, resetRoomEdits(saved.objects));
+          }
+        })
+        .catch(() => undefined);
+    }
+    if (pack !== "islands") {
+      loadSegments("sky")
+        .then((saved) => {
+          if (saved?.objects.length) cache.current.set(DESERT, structuredClone(saved.objects));
+        })
+        .catch(() => undefined);
+      loadSegments("crowd")
+        .then((saved) => {
+          if (!saved) return;
+          if (saved.background) bgCache.current.set(CROWD, saved.background);
+          if (saved.objects.length) cache.current.set(CROWD, structuredClone(saved.objects));
+        })
+        .catch(() => undefined);
+    }
+  }, [pack]);
 
   useEffect(() => {
     fetch("/api/editors")
@@ -370,6 +390,27 @@ export function AiEditApp() {
         cancel = true;
       };
     }
+    if (source === PROFESSIONAL) {
+      const background = LOOK_BACKGROUNDS.find((item) => item.id === lookBg);
+      const coat = LOOK_COATS.find((item) => item.id === lookCoat);
+      const backgroundSrc = background?.id && background.id !== "original" ? background.src || null : null;
+      const photoSrc = coat?.src || PROFESSIONAL;
+      const maskSrc = coat?.mask;
+      if (!backgroundSrc && (!coat || coat.id === "original")) {
+        setView(null);
+        return;
+      }
+      applyProfessionalLook(photoSrc, backgroundSrc, maskSrc)
+        .then((url) => {
+          if (!cancel) setView(url);
+        })
+        .catch((reason) => {
+          if (!cancel) setError(reason instanceof Error ? reason.message : "Could not update the look");
+        });
+      return () => {
+        cancel = true;
+      };
+    }
     if (objects.length === 0) return;
     const empty = bgCache.current.get(source) || null;
     // When None already shows the saved empty courtyard, skip punch (avoids soft ghosts on clean bg).
@@ -384,7 +425,7 @@ export function AiEditApp() {
     return () => {
       cancel = true;
     };
-  }, [mode, working, objects, warmth, source, fillTick, skyId, skyZoom]);
+  }, [mode, working, objects, warmth, source, fillTick, skyId, skyZoom, lookBg, lookCoat]);
 
   /**
    * Keep auto edit lines in sync with the current segments (recolor / move / remove).
@@ -593,7 +634,7 @@ export function AiEditApp() {
     nextWarmth: number,
     label: string,
     meta: string,
-    extra?: Pick<Step, "skyId" | "skyZoom" | "crowdLevel">
+    extra?: Pick<Step, "skyId" | "skyZoom" | "crowdLevel" | "lookBg" | "lookCoat">
   ) {
     const step: Step = {
       id: uid(),
@@ -606,6 +647,8 @@ export function AiEditApp() {
       skyId: extra?.skyId ?? skyId,
       skyZoom: extra?.skyZoom ?? skyZoom,
       crowdLevel: extra?.crowdLevel ?? crowdLevel,
+      lookBg: extra?.lookBg ?? lookBg,
+      lookCoat: extra?.lookCoat ?? lookCoat,
     };
     const history = [...steps.slice(0, at + 1), step];
     setSteps(history);
@@ -768,6 +811,45 @@ export function AiEditApp() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function openProfessional() {
+    setError("");
+    segmentKind.current = "objects";
+    setSource(PROFESSIONAL);
+    workingRef.current = PROFESSIONAL;
+    setWorking(PROFESSIONAL);
+    setPhoto(PROFESSIONAL);
+    setView(null);
+    setSelected(null);
+    setObjects([]);
+    setLookBg("original");
+    setLookCoat("original");
+    setSteps([
+      {
+        id: uid(),
+        label: tx("Opened professional look", "打开正装场景"),
+        meta: tx("Background and coat are structured controls", "背景和外套是结构化控制"),
+        objects: [],
+        warmth: 0,
+        shown: true,
+        lookBg: "original",
+        lookCoat: "original",
+      },
+    ]);
+    setAt(0);
+    setMode("home");
+  }
+
+  function applyLook(nextBg: string, nextCoat: string) {
+    const background = LOOK_BACKGROUNDS.find((item) => item.id === nextBg) || LOOK_BACKGROUNDS[0];
+    const coat = LOOK_COATS.find((item) => item.id === nextCoat) || LOOK_COATS[0];
+    setLookBg(background.id);
+    setLookCoat(coat.id);
+    snapshot(objects, warmth, tx(`${background.label} · ${coat.label}`, `${background.zh} · ${coat.zh}`), tx("Professional", "正装"), {
+      lookBg: background.id,
+      lookCoat: coat.id,
+    });
   }
 
   function applySky(id: string) {
@@ -1170,6 +1252,8 @@ export function AiEditApp() {
     if (step.skyId) setSkyId(step.skyId);
     if (typeof step.skyZoom === "number") setSkyZoom(step.skyZoom);
     if (typeof step.crowdLevel === "number") setCrowdLevel(step.crowdLevel);
+    if (step.lookBg) setLookBg(step.lookBg);
+    if (step.lookCoat) setLookCoat(step.lookCoat);
     if (mode === "review" || mode === "voice") setMode("home");
   }
 
@@ -1225,6 +1309,10 @@ export function AiEditApp() {
     if (shot.kind === "sky") {
       setSkyId("original");
       setSkyZoom(1.15);
+    }
+    if (shot.kind === "pro") {
+      setLookBg("original");
+      setLookCoat("original");
     }
   }
 
@@ -1297,6 +1385,10 @@ export function AiEditApp() {
     }
     if (shot.kind === "sky") {
       await openSky();
+      return;
+    }
+    if (shot.kind === "pro") {
+      openProfessional();
       return;
     }
     if (shot.kind === "room") {
@@ -1615,6 +1707,69 @@ export function AiEditApp() {
   const addIdea = ideas.add;
   const allIdea = { warmth: ideas.all.warmth, label: tx(ideas.all.en, ideas.all.zh) };
 
+  function peekItems() {
+    return faceOn ? faceMarks : visible;
+  }
+
+  function paintPeek() {
+    const canvas = boundsRef.current;
+    const stage = stageRef.current;
+    const photo = stage?.querySelector("img");
+    if (!canvas || !photo) return;
+    const width = photo.naturalWidth || 800;
+    const height = photo.naturalHeight || Math.round(width / ratio);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+    for (const object of peekItems()) {
+      const bits = maskBits.current.get(object.mask);
+      if (!bits) continue;
+      const tint = tintFromMask(bits, object.keyColor || "#d4f5ac");
+      const scale = object.scale / 100 || 1;
+      const cx = (object.box.x + object.box.w / 2) * width;
+      const cy = (object.box.y + object.box.h / 2) * height;
+      ctx.save();
+      ctx.translate(object.dx * width, object.dy * height);
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.translate(-cx, -cy);
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(tint, 0, 0, width, height);
+      ctx.restore();
+    }
+  }
+
+  function beginPeek(event: PointerEvent<HTMLElement>) {
+    if (!editing || mode === "review" || mode === "voice" || busy) return;
+    if ((event.target as HTMLElement).closest("button, .ae-x, .ae-resize, .ae-compare")) return;
+    window.clearTimeout(peekTimer.current);
+    peekOrigin.current = { x: event.clientX, y: event.clientY };
+    peekTimer.current = window.setTimeout(() => {
+      const session = drag.current;
+      if (session) {
+        if (session.face) {
+          faceLive.current = session.base;
+          setFaceObjects(session.base);
+        } else setObjects(session.base);
+        drag.current = null;
+      }
+      setPeek(true);
+    }, 380);
+  }
+
+  function endPeek() {
+    window.clearTimeout(peekTimer.current);
+    peekOrigin.current = null;
+    setPeek(false);
+  }
+
+  useEffect(() => {
+    if (!peek) return;
+    paintPeek();
+  }, [peek, objects, faceObjects, ratio]);
+
   function startBox(event: PointerEvent<HTMLElement>, object: SegmentObject, face: boolean, kind: "move" | "resize") {
     event.stopPropagation();
     event.preventDefault();
@@ -1679,6 +1834,8 @@ export function AiEditApp() {
         if (prior.skyId) setSkyId(prior.skyId);
         if (typeof prior.skyZoom === "number") setSkyZoom(prior.skyZoom);
         if (typeof prior.crowdLevel === "number") setCrowdLevel(prior.crowdLevel);
+        if (prior.lookBg) setLookBg(prior.lookBg);
+        if (prior.lookCoat) setLookCoat(prior.lookCoat);
       }
       setMode("home");
       return;
@@ -1780,7 +1937,7 @@ export function AiEditApp() {
         onPointerUpCapture={(event) => pointers.current.delete(event.pointerId)}
         onPointerCancelCapture={(event) => pointers.current.delete(event.pointerId)}
       >
-        {editing && mode === "review" ? <div className="ae-tip">{tx("Colored areas are the new edits on the original. Approve to keep them as segments", "彩色区域是叠在原图上的新改动，采用后会变成可编辑的分区")}</div> : editing && source === DESERT ? <div className="ae-tip">{tx("Pick a sky, then zoom to make the clouds bigger or smaller", "选择天空，再用滑块放大或缩小云层")}</div> : editing && mode !== "object" ? <div className="ae-tip">{tx("Tap an object in the photo to edit it", "你可以选择图片中的对象直接编辑")}</div> : null}
+        {peek ? <div className="ae-tip">{tx("Hold to see every object you can move or change. Release to hide.", "按住可看到所有能移动或修改的物体，松开后隐藏。")}</div> : editing && mode === "review" ? <div className="ae-tip">{tx("Colored areas are the new edits on the original. Approve to keep them as segments", "彩色区域是叠在原图上的新改动，采用后会变成可编辑的分区")}</div> : editing && source === DESERT ? <div className="ae-tip">{tx("Pick a sky, then zoom to make the clouds bigger or smaller", "选择天空，再用滑块放大或缩小云层")}</div> : editing && source === PROFESSIONAL ? null : editing && source === CROWD ? <div className="ae-tip">{tx("Set how many people stay in the scene", "设置场景中留下多少人")}</div> : editing && mode !== "object" ? <div className="ae-tip">{tx("Tap an object in the photo to edit it. Hold to see every object.", "点选照片中的物体即可编辑。按住可看到全部物体。")}</div> : null}
         <div
           ref={stageRef}
           className="ae-stage"
@@ -1791,8 +1948,13 @@ export function AiEditApp() {
             transformOrigin: "0 0",
           }}
           onPointerMove={(event) => {
+            const origin = peekOrigin.current;
+            if (origin && !peek && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 12) {
+              window.clearTimeout(peekTimer.current);
+              peekOrigin.current = null;
+            }
             const session = drag.current;
-            if (!session || pointers.current.size >= 2) return;
+            if (!session || pointers.current.size >= 2 || peek) return;
             const rect = event.currentTarget.getBoundingClientRect();
             const dx = (event.clientX - session.x) / rect.width;
             const dy = (event.clientY - session.y) / rect.height;
@@ -1808,6 +1970,7 @@ export function AiEditApp() {
             } else setObjects(next);
           }}
           onPointerUp={() => {
+            endPeek();
             const session = drag.current;
             drag.current = null;
             if (!session) return;
@@ -1824,11 +1987,16 @@ export function AiEditApp() {
               if (hit) void toggleIsland(hit.id);
               return;
             }
+            beginPeek(event);
             if (event.target !== event.currentTarget && !(event.target instanceof HTMLImageElement)) return;
             const rect = event.currentTarget.getBoundingClientRect();
             const hit = segmentAt((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height, faceOn ? faceMarks : visible);
             if (hit) startBox(event, hit, faceOn, "move");
             else clearSelection();
+          }}
+          onPointerCancel={endPeek}
+          onPointerLeave={(event) => {
+            if (event.buttons === 0) endPeek();
           }}
         >
           {editing ? (
@@ -1844,6 +2012,7 @@ export function AiEditApp() {
               if (image.naturalWidth) setRatio(image.naturalWidth / image.naturalHeight);
             }}
           />
+          <canvas ref={boundsRef} className="ae-bounds" hidden={!peek} aria-hidden="true" />
           {faceOn || (editing && mode !== "voice" && mode !== "review")
             ? (faceOn ? faceMarks : visible).map((object) => {
                 const frame = boxFrame(object);
@@ -1852,11 +2021,12 @@ export function AiEditApp() {
                 return (
                   <div
                     key={object.id}
-                    className={on ? "ae-box on" : "ae-box"}
-                    style={{ left: `${frame.left * 100}%`, top: `${frame.top * 100}%`, width: `${frame.width * 100}%`, height: `${frame.height * 100}%` }}
+                    className={on ? "ae-box on" : peek ? "ae-box peek" : "ae-box"}
+                    style={{ left: `${frame.left * 100}%`, top: `${frame.top * 100}%`, width: `${frame.width * 100}%`, height: `${frame.height * 100}%`, ["--c" as string]: object.keyColor || "#d4f5ac" }}
                     onPointerDown={(event) => {
                       const target = event.target as HTMLElement;
                       if (target.closest(".ae-resize, .ae-x")) return;
+                      beginPeek(event);
                       const stage = stageRef.current?.getBoundingClientRect();
                       if (!stage) return;
                       const hit = segmentAt((event.clientX - stage.left) / stage.width, (event.clientY - stage.top) / stage.height, faceOn ? faceMarks : visible);
@@ -1864,7 +2034,7 @@ export function AiEditApp() {
                       else clearSelection();
                     }}
                   >
-                    {on ? <b>{shown} · {tx("Drag to move", "拖动移动")}</b> : null}
+                    {on || peek ? <b>{peek && !on ? shown : `${shown} · ${tx("Drag to move", "拖动移动")}`}</b> : null}
                     {on ? (
                       <button
                         type="button"
@@ -1957,7 +2127,9 @@ export function AiEditApp() {
                 <span>{tx(shot.label, shot.zh)}</span>
               </button>
             ))}
-            <button type="button" className="ae-add" aria-label={tx("Add a photo", "添加照片")} onClick={() => photoRef.current?.click()}>+</button>
+            {pack === "islands" ? (
+              <button type="button" className="ae-add" aria-label={tx("Add a photo", "添加照片")} onClick={() => photoRef.current?.click()}>+</button>
+            ) : null}
           </div>
           <div className="ae-tools">
             <button type="button" className="ae-ai" disabled={busy} onClick={() => void openActive()}>✧ &nbsp; {tx("AI Edit", "AI 编辑")}</button>
@@ -2028,6 +2200,17 @@ export function AiEditApp() {
                     skyZoom: zoom,
                   });
                 }}
+              />
+            </div>
+          ) : source === PROFESSIONAL && mode !== "review" ? (
+            <div className="ae-examples">
+              <LookPicker
+                background={lookBg}
+                coat={lookCoat}
+                busy={busy}
+                zh={zh}
+                onBackground={(id) => applyLook(id, lookCoat)}
+                onCoat={(id) => applyLook(lookBg, id)}
               />
             </div>
           ) : source === CROWD && mode !== "review" ? (
@@ -2228,6 +2411,52 @@ export function AiEditApp() {
     </div>
   );
 }
+function LookPicker(props: {
+  background: string;
+  coat: string;
+  busy: boolean;
+  zh: boolean;
+  onBackground: (id: string) => void;
+  onCoat: (id: string) => void;
+}) {
+  return (
+    <div className="ae-look">
+      <p className="ae-option-title"><span>{props.zh ? "背景" : "Background"}</span></p>
+      <div className="ae-look-grid">
+        {LOOK_BACKGROUNDS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={props.background === item.id ? "on" : ""}
+            disabled={props.busy}
+            aria-label={props.zh ? item.zh : item.label}
+            onClick={() => props.onBackground(item.id)}
+          >
+            <img src={item.src || PROFESSIONAL} alt="" />
+            <span>{props.zh ? item.zh : item.label}</span>
+          </button>
+        ))}
+      </div>
+      <p className="ae-option-title"><span>{props.zh ? "外套" : "Coat"}</span></p>
+      <div className="ae-look-coats">
+        {LOOK_COATS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={props.coat === item.id ? "on" : ""}
+            disabled={props.busy}
+            aria-label={props.zh ? item.zh : item.label}
+            onClick={() => props.onCoat(item.id)}
+          >
+            <i style={{ background: item.hex || "#9aa3b0" }} />
+            <span>{props.zh ? item.zh : item.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SkyPicker(props: {
   skyId: string;
   zoom: number;
@@ -2239,7 +2468,7 @@ function SkyPicker(props: {
 }) {
   return (
     <div className="ae-skies">
-      <p className="ae-option-title"><span>{props.zh ? "天空" : "Skies"}</span></p>
+      <p className="ae-option-title"><span>{props.zh ? "天空" : "Sky"}</span></p>
       <div className="ae-sky-grid">
         {SKY_PRESETS.map((preset) => (
           <button
@@ -2283,7 +2512,7 @@ function CrowdSlider(props: { level: number; busy: boolean; zh: boolean; onChang
   const current = CROWD_LEVELS.find((item) => item.value === props.level) || CROWD_LEVELS[CROWD_LEVELS.length - 1];
   return (
     <div className="ae-crowd">
-      <p className="ae-option-title"><span>{props.zh ? "庭院人数" : "Crowd in the courtyard"}</span></p>
+      <p className="ae-option-title"><span>{props.zh ? "人数" : "Crowd"}</span></p>
       <p className="ae-crowd-value">{props.zh ? current.zh : current.en}</p>
       <input
         type="range"
@@ -2293,7 +2522,7 @@ function CrowdSlider(props: { level: number; busy: boolean; zh: boolean; onChang
         step={1}
         value={props.level}
         disabled={props.busy}
-        aria-label={props.zh ? "庭院人数" : "Crowd density"}
+        aria-label={props.zh ? "人数" : "Crowd"}
         onChange={(event) => props.onChange(Number(event.target.value))}
       />
       <div className="ae-crowd-ticks" aria-hidden="true">
@@ -2501,6 +2730,47 @@ function pickAdded(kept: SegmentObject[], found: SegmentObject[], name: string) 
     ...object,
     name: object.name === "Object" || object.name === "Region" ? name : object.name,
   }));
+}
+
+function hexRgb(value: string): [number, number, number] {
+  const raw = value.replace("#", "");
+  const hex = raw.length === 3 ? raw.split("").map((ch) => ch + ch).join("") : raw.padEnd(6, "0");
+  const n = Number.parseInt(hex.slice(0, 6), 16);
+  if (Number.isNaN(n)) return [212, 245, 172];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function tintFromMask(bits: { width: number; height: number; alpha: Uint8ClampedArray }, color: string) {
+  const canvas = document.createElement("canvas");
+  canvas.width = bits.width;
+  canvas.height = bits.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  const image = ctx.createImageData(bits.width, bits.height);
+  const [r, g, b] = hexRgb(color);
+  const { width, height, alpha } = bits;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = y * width + x;
+      if (alpha[i] < 28) continue;
+      const edge =
+        x === 0 ||
+        y === 0 ||
+        x === width - 1 ||
+        y === height - 1 ||
+        alpha[i - 1] < 28 ||
+        alpha[i + 1] < 28 ||
+        alpha[i - width] < 28 ||
+        alpha[i + width] < 28;
+      const o = i * 4;
+      image.data[o] = edge ? 255 : r;
+      image.data[o + 1] = edge ? 255 : g;
+      image.data[o + 2] = edge ? 255 : b;
+      image.data[o + 3] = edge ? 230 : 140;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
 }
 
 function boxFrame(object: SegmentObject) {

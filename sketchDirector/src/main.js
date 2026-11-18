@@ -56,14 +56,14 @@ function setBusy(on, copy) {
 function setView(view) {
   sheet.dataset.mode = view;
   if (view === "open") {
-    barTitle.textContent = "Pick a photo";
+    barTitle.textContent = "Pick a panel";
     barSub.textContent = "";
     gizmo.hidden = true;
     editBar.hidden = true;
     hideResult();
     selected = null;
   } else {
-    barTitle.textContent = "Sketch Director";
+    barTitle.textContent = "Story / comics";
   }
   syncEditButtons();
 }
@@ -597,12 +597,12 @@ async function runSketch() {
   const onPhoto = Boolean(sourcePhoto);
   concept = promptEl.value.trim() || concept || (onPhoto ? "Photo edit" : "");
   if (!concept && !onPhoto) {
-    setStatus("Describe a scene first.", true);
+    setStatus("Describe the story beat first.", true);
     return;
   }
   mode = onPhoto ? "edit" : "sketch";
   setBusy(true, onPhoto ? "Marking" : "Sketching");
-  setStatus(onPhoto ? "Drawing on the photo…" : "Laying out objects…");
+  setStatus(onPhoto ? "Sketching the next beat on this still…" : "Laying out the comic panel…");
   try {
     const bodyIn = { concept };
     if (onPhoto) {
@@ -661,7 +661,7 @@ async function runBanana() {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || "Nano Banana failed");
     showPhoto(body.image);
-    setStatus(body.cached ? "Photograph from this sketch." : "Photograph from the sketch.");
+    setStatus(body.cached ? "Panel from this sketch." : "Panel from the sketch.");
     await refreshScenes();
   } catch (error) {
     setStatus(error.message || "Nano Banana failed", true);
@@ -675,7 +675,7 @@ function openBlank() {
   mode = "sketch";
   concept = "";
   promptEl.value = "";
-  promptEl.placeholder = "Describe the scene.";
+  promptEl.placeholder = "Describe the story beat or comic panel.";
   setUnderlay("");
   hideResult();
   svgMarkup = "";
@@ -683,7 +683,7 @@ function openBlank() {
   historyIndex = -1;
   selected = null;
   bananaBtn.disabled = true;
-  stage.innerHTML = `<p id="empty">Type a prompt, then Sketch.</p>`;
+  stage.innerHTML = `<p id="empty">Type the beat, then Sketch the panel.</p>`;
   setView("work");
   barSub.textContent = "";
 }
@@ -693,7 +693,7 @@ async function openScene(scene) {
   concept = scene.concept || "";
   const photoUrl = scene.photo || scene.source;
   mode = photoUrl ? "edit" : "sketch";
-  promptEl.placeholder = photoUrl ? "What should change?" : "Describe the scene.";
+  promptEl.placeholder = photoUrl ? "What happens next in the story?" : "Describe the story beat or comic panel.";
   setUnderlay(photoUrl || "");
   hideResult();
   renderThumbs();
@@ -704,7 +704,7 @@ async function openScene(scene) {
   selected = null;
   bananaBtn.disabled = true;
   if (photoUrl) {
-    stage.innerHTML = `<p id="empty">Tap Sketch to mark the edit.</p>`;
+    stage.innerHTML = `<p id="empty">Tap Sketch to block the next panel.</p>`;
     syncEditButtons();
     barSub.textContent = "";
     return;
@@ -715,7 +715,7 @@ async function openScene(scene) {
     barSub.textContent = "";
     return;
   }
-  stage.innerHTML = `<p id="empty">Type a prompt, then Sketch.</p>`;
+  stage.innerHTML = `<p id="empty">Type the beat, then Sketch the panel.</p>`;
   syncEditButtons();
   barSub.textContent = "";
 }

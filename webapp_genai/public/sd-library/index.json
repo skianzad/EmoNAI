@@ -1,0 +1,54 @@
+[
+  {
+    "id": "face",
+    "en": "Face",
+    "zh": "face",
+    "aliases": [
+      "face",
+      "faces"
+    ],
+    "body": "<g transform=\"translate(2.5403610678280124 -5.088235294117645) scale(0.19117647058823528)\">\n    <!-- Hair outline -->\n    <path d=\"M 90 180 C 75 140 85 90 120 70 C 160 50 215 55 240 85 C 265 115 260 160 250 185\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    <path d=\"M 120 70 C 135 100 160 115 195 118 C 220 120 240 105 245 95\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.0\" stroke-linecap=\"round\"></path>\n    \n    <!-- Forehead, nose, lips, chin, jawline in 3/4 angled down profile -->\n    <path d=\"M 175 115 C 185 135 190 150 192 165 L 202 185 L 188 190 C 185 198 188 205 193 207 C 185 212 180 220 184 228 C 186 232 182 238 174 242 C 158 248 135 235 125 210 L 120 190\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    \n    <!-- Eye angled downward -->\n    <path d=\"M 160 152 Q 172 150 180 158\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\"></path>\n    <path d=\"M 165 158 Q 173 162 178 159\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.0\" stroke-linecap=\"round\"></path>\n    <circle cx=\"172\" cy=\"157\" r=\"2.2\" fill=\"#000000\"></circle>\n    <!-- Eyebrow tilted with attention -->\n    <path d=\"M 158 142 Q 170 138 184 145\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\"></path>\n\n    <!-- Ear -->\n    <path d=\"M 118 175 C 112 170 108 175 108 185 C 108 198 114 205 122 202\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.0\" stroke-linecap=\"round\"></path>\n    <path d=\"M 114 182 Q 112 190 116 193\" fill=\"none\" stroke=\"#000000\" stroke-width=\"1.8\" stroke-linecap=\"round\"></path>\n\n    <!-- Neck and shoulders -->\n    <path d=\"M 132 238 L 130 280 C 120 295 85 315 50 330\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\"></path>\n    <path d=\"M 165 245 Q 175 270 190 290\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\"></path>\n  </g>",
+    "kind": "icon",
+    "custom": true
+  },
+  {
+    "id": "hand",
+    "en": "Hand",
+    "zh": "hand",
+    "aliases": [
+      "hand",
+      "hands"
+    ],
+    "body": "<g transform=\"translate(-45.41281461424775 -70.2191801438034) scale(0.24657534643039114)\">\n    <!-- Forearm leading up from lower right -->\n    <path d=\"M 330 520 L 305 450 C 298 430 288 410 278 395\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.4\" stroke-linecap=\"round\"></path>\n    <path d=\"M 390 495 L 355 425 C 345 400 330 380 320 370\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.4\" stroke-linecap=\"round\"></path>\n    \n    <!-- Wrist & Palm base -->\n    <path d=\"M 278 395 C 270 385 262 375 258 360\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\"></path>\n    \n    <!-- Thumb resting over/grasping the side -->\n    <path d=\"M 258 360 C 250 350 240 335 238 318 C 237 310 244 306 250 312 C 258 322 268 338 274 348\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    \n    <!-- Fingers curled along the other side / back -->\n    <!-- Index finger -->\n    <path d=\"M 285 320 C 278 312 272 308 266 312 C 260 316 262 326 270 332 L 285 342\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    <!-- Middle finger -->\n    <path d=\"M 292 334 C 285 326 278 322 273 327 C 268 332 270 340 278 347 L 294 356\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    <!-- Ring finger -->\n    <path d=\"M 300 350 C 293 342 287 340 282 345 C 278 350 280 357 288 363 L 302 371\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    <!-- Pinky finger -->\n    <path d=\"M 307 367 C 302 360 297 358 293 363 C 289 368 292 374 298 380 L 314 388\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path>\n    \n    <!-- Palm creases and contours -->\n    <path d=\"M 282 375 C 288 385 298 392 308 395\" fill=\"none\" stroke=\"#000000\" stroke-width=\"1.8\" stroke-linecap=\"round\"></path>\n  </g>",
+    "kind": "icon",
+    "custom": true
+  },
+  {
+    "id": "whale",
+    "en": "Whale",
+    "zh": "Whale",
+    "aliases": [
+      "whale",
+      "whales"
+    ],
+    "body": "<g transform=\"translate(0.08473124796262255 -5.554529533443592) scale(0.15021811813377436)\">\n    <!-- Whale Body -->\n    <path d=\"M 330 260 C 310 215, 230 200, 150 220 C 90 235, 45 270, 40 310 C 35 345, 60 375, 120 380 C 185 385, 250 360, 290 325 C 320 300, 335 275, 330 260 Z\" stroke=\"black\" stroke-width=\"2.4\" stroke-linejoin=\"round\" fill=\"none\"></path>\n    \n    <!-- Whale Belly Lines -->\n    <path d=\"M 95 365 C 135 375, 190 370, 235 348\" stroke=\"black\" stroke-width=\"2\" fill=\"none\"></path>\n    <path d=\"M 120 378 C 160 382, 205 375, 250 350\" stroke=\"black\" stroke-width=\"2\" fill=\"none\"></path>\n    \n    <!-- Whale Tail / Flukes -->\n    <path d=\"M 320 280 C 340 270, 360 250, 375 235 C 365 255, 360 270, 368 280 C 378 288, 388 292, 385 305 C 365 300, 345 292, 325 292\" stroke=\"black\" stroke-width=\"2.4\" stroke-linejoin=\"round\" fill=\"none\"></path>\n    \n    <!-- Flipper -->\n    <path d=\"M 155 330 C 150 365, 130 385, 115 395 C 120 380, 135 350, 140 330\" stroke=\"black\" stroke-width=\"2.2\" stroke-linejoin=\"round\" fill=\"none\"></path>\n    \n    <!-- Eye and Mouth -->\n    <circle cx=\"85\" cy=\"305\" r=\"3.5\" fill=\"black\"></circle>\n    <path d=\"M 45 320 Q 75 325, 105 318\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n\n    <!-- Water Spout -->\n    <path d=\"M 175 215 C 175 170, 160 145, 140 130 C 165 140, 175 165, 180 213\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 180 180 C 190 155, 210 140, 230 135 C 215 150, 195 170, 185 214\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 178 160 C 178 135, 185 115, 188 105\" stroke=\"black\" stroke-width=\"1.8\" stroke-linecap=\"round\" fill=\"none\"></path>\n  </g>",
+    "kind": "icon",
+    "custom": true
+  },
+  {
+    "id": "horizon-and-water",
+    "en": "Horizon and Water",
+    "zh": "Horizon and Water",
+    "aliases": [
+      "horizon-and-water",
+      "horizon and water",
+      "horizon",
+      "and",
+      "water",
+      "horizon and waters"
+    ],
+    "body": "<g transform=\"translate(6 -20.166666666666664) scale(0.13333333333333333)\">\n    <path d=\"M 0 310 Q 95 305, 195 310 T 390 310\" stroke=\"black\" stroke-width=\"2.2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 15 340 Q 60 335, 120 342 T 230 338\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 270 345 Q 320 350, 375 342\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 40 430 Q 110 435, 180 428 T 330 432\" stroke=\"black\" stroke-width=\"2\" stroke-linecap=\"round\" fill=\"none\"></path>\n    <path d=\"M 80 475 Q 160 465, 260 472\" stroke=\"black\" stroke-width=\"1.9\" stroke-linecap=\"round\" fill=\"none\"></path>\n  </g>",
+    "kind": "icon",
+    "custom": true
+  }
+]

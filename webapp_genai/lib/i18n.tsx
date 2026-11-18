@@ -70,6 +70,39 @@ type Dict = {
   couldNotOpen: string;
   demoPromptBag: string;
   demoPromptPeople: string;
+  approachTree: string;
+  approachIslands: string;
+  approachControls: string;
+  approachSketch: string;
+  approachRefs: string;
+  approachBlurbTree: string;
+  approachBlurbIslands: string;
+  approachBlurbControls: string;
+  approachBlurbSketch: string;
+  approachBlurbRefs: string;
+  approachesLabel: string;
+  comboVersions: string;
+  comboSliders: string;
+  controlsTitle: string;
+  controlsBody: string;
+  colorTitle: string;
+  colorSubtitle: string;
+  colorToggle: string;
+  coloring: string;
+  colorObjects: string;
+  noObjects: string;
+  objectCount: (n: number) => string;
+  showMap: string;
+  showAdjust: string;
+  colorHint: string;
+  colorHintOff: string;
+  colorLabel: string;
+  sizeLabel: string;
+  drawFailed: string;
+  refsTitle: string;
+  refsBody: string;
+  refsBusy: string;
+  refsAlt: string;
 };
 
 const en: Dict = {
@@ -138,6 +171,39 @@ const en: Dict = {
   couldNotOpen: "Could not open this process.",
   demoPromptBag: "Move the handbag from the chair to the table.",
   demoPromptPeople: "Remove the people in the back.",
+  approachTree: "Version tree",
+  approachIslands: "Edit islands",
+  approachControls: "Structured prompt controls",
+  approachSketch: "Fast preview",
+  approachRefs: "Supporting references",
+  approachBlurbTree: "Each prompt is a branch, and later edits build on a parent result. Open a prompt, add a subprompt, or hide a version — the photo is the history of those branches, not a single overwritten image.",
+  approachBlurbIslands: "Each AI change becomes its own region you can keep, move, or undo. Regeneration does not force you to accept every pixel the model touched, so real edits stay separate from unwanted drift.",
+  approachBlurbControls: "Instead of a new freeform prompt, change one axis of the scene: pick a sky, set crowd density, or restyle the background and coat for a professional look.",
+  approachBlurbSketch: "Fast preview is Sketch Director: type dog, cat, bird — or pick from a PowerPoint-style symbol library — and those stamps appear immediately. Already placed symbols stay; Sketch only draws what is not in the library.",
+  approachBlurbRefs: "Supporting references would use burst frames, Live Photos, or Gallery shots as evidence so an edit copies real detail. That work has not started; nothing in this demo is a references prototype.",
+  approachesLabel: "Five approaches",
+  comboVersions: "Version tree",
+  comboSliders: "Colour, size, hide",
+  controlsTitle: "Structured prompt controls",
+  controlsBody: "Sky, crowd, and professional look are structured controls: one slider or preset, not a new prompt.",
+  colorTitle: "Color objects",
+  colorSubtitle: "First prompt paints each object a new color",
+  colorToggle: "Color objects",
+  coloring: "Coloring…",
+  colorObjects: "Color the objects",
+  noObjects: "No separate objects found.",
+  objectCount: (n) => `${n} objects`,
+  showMap: "Show the AI color map",
+  showAdjust: "Show adjustments",
+  colorHint: "The model paints every important object a flat color that is not already in the photo, and returns the list. Then change a color or a size here, without another prompt.",
+  colorHintOff: "Turn this on to ask the model for a color map of the photo.",
+  colorLabel: "Color",
+  sizeLabel: "Size",
+  drawFailed: "Could not draw the objects",
+  refsTitle: "Supporting references",
+  refsBody: "Not started. Burst, Live Photo, and Gallery evidence are defined as an idea only. This phone is empty on purpose.",
+  refsBusy: "Matching sky…",
+  refsAlt: "Desert with a referenced sky",
 };
 
 const zh: Dict = {
@@ -206,6 +272,39 @@ const zh: Dict = {
   couldNotOpen: "无法打开此流程。",
   demoPromptBag: "把手提包从椅子上移到桌子上。",
   demoPromptPeople: "去掉背景中的人。",
+  approachTree: "Version tree",
+  approachIslands: "Edit islands",
+  approachControls: "Structured prompt controls",
+  approachSketch: "Fast preview",
+  approachRefs: "Supporting references",
+  approachBlurbTree: "每次提示都是一条分支，后续修改叠在父结果上。打开提示、加子提示或隐藏某个版本，照片就是这些分支的历史，而不是被覆盖掉的单张图。",
+  approachBlurbIslands: "每一次 AI 改动都变成可保留、可移动、可撤销的独立区域。重新生成时不必接受模型碰到的每一个像素，真正的编辑和多余的漂移得以分开。",
+  approachBlurbControls: "不必再写一条自由提示，只改场景的一个维度：换天空、调人群疏密，或改背景和外套做成正装。",
+  approachBlurbSketch: "Fast preview 就是 Sketch Director：输入狗、猫、鸟，或从符号库点选，符号立刻出现在画面上。已经放上的符号会保留，草图只画库里没有的部分。",
+  approachBlurbRefs: "Supporting references 本应用连拍、实况照片或图库原图当证据，让编辑拷贝真实细节。这项工作还没开始；当前演示里没有任何参考图原型。",
+  approachesLabel: "Five approaches",
+  comboVersions: "Version tree",
+  comboSliders: "Colour, size, hide",
+  controlsTitle: "Structured prompt controls",
+  controlsBody: "天空、人群和正装是结构化控制：一个滑块或预设，而不是新的提示词。",
+  colorTitle: "给物体上色",
+  colorSubtitle: "第一次提示为每个物体铺上新颜色",
+  colorToggle: "给物体上色",
+  coloring: "正在上色…",
+  colorObjects: "给物体上色",
+  noObjects: "没有找到独立物体。",
+  objectCount: (n) => `${n} 个物体`,
+  showMap: "显示 AI 色图",
+  showAdjust: "显示调整结果",
+  colorHint: "模型会把每个重要物体涂成照片里没有的纯色，并返回列表。然后在这里改颜色或大小，不用再写提示词。",
+  colorHintOff: "打开后即可让模型生成这张照片的色图。",
+  colorLabel: "颜色",
+  sizeLabel: "大小",
+  drawFailed: "无法绘制物体",
+  refsTitle: "Supporting references",
+  refsBody: "尚未开始。连拍、实况照片和图库证据只停留在想法。这部手机里故意是空的。",
+  refsBusy: "正在匹配天空…",
+  refsAlt: "带参考天空的沙漠",
 };
 
 const dictionaries = { en, zh } as const;
@@ -237,6 +336,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
   function setLang(next: Lang) {
     localStorage.setItem("lang", next);
     setLangState(next);
+    window.dispatchEvent(new CustomEvent("app-lang", { detail: next }));
   }
 
   return (

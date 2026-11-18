@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 520" data-bound="1"><g data-name="Hand" data-symbol="hand" id="sym-hand-1" data-cx="32" data-cy="32" data-tx="169.5455551147461" data-ty="250.67616271972656" data-rot="0" data-sx="1.6" data-sy="1.6" data-rx="0" data-ry="0" transform="translate(201.5455551147461 282.67616271972656) rotate(0) skewX(0) scale(1.6 1.6) translate(-32 -32)" class=""><svg width="64" height="64" viewBox="0 0 64 64" overflow="hidden"><g transform="translate(-45.41281461424775 -70.2191801438034) scale(0.24657534643039114)">
+    <!-- Forearm leading up from lower right -->
+    <path d="M 330 520 L 305 450 C 298 430 288 410 278 395" fill="none" stroke="#000000" stroke-width="2.4" stroke-linecap="round"></path>
+    <path d="M 390 495 L 355 425 C 345 400 330 380 320 370" fill="none" stroke="#000000" stroke-width="2.4" stroke-linecap="round"></path>
+    
+    <!-- Wrist & Palm base -->
+    <path d="M 278 395 C 270 385 262 375 258 360" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+    
+    <!-- Thumb resting over/grasping the side -->
+    <path d="M 258 360 C 250 350 240 335 238 318 C 237 310 244 306 250 312 C 258 322 268 338 274 348" fill="none" stroke="#000000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Fingers curled along the other side / back -->
+    <!-- Index finger -->
+    <path d="M 285 320 C 278 312 272 308 266 312 C 260 316 262 326 270 332 L 285 342" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    <!-- Middle finger -->
+    <path d="M 292 334 C 285 326 278 322 273 327 C 268 332 270 340 278 347 L 294 356" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    <!-- Ring finger -->
+    <path d="M 300 350 C 293 342 287 340 282 345 C 278 350 280 357 288 363 L 302 371" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    <!-- Pinky finger -->
+    <path d="M 307 367 C 302 360 297 358 293 363 C 289 368 292 374 298 380 L 314 388" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Palm creases and contours -->
+    <path d="M 282 375 C 288 385 298 392 308 395" fill="none" stroke="#000000" stroke-width="1.8" stroke-linecap="round"></path>
+  </g></svg></g><g data-name="Phone" data-symbol="phone" id="sym-phone-1" data-cx="32" data-cy="32" data-tx="149.6583251953125" data-ty="228.87289428710938" data-rot="0" data-sx="1.6" data-sy="1.6" data-rx="10.609297943115235" data-ry="-62.42715911865234" transform="translate(181.6583251953125 260.8728942871094) rotate(0) skewX(-7.491259094238281) scale(0.74060145339666 1.5726487754130694) translate(-32 -32)" class=""><svg width="64" height="64" viewBox="0 0 64 64" overflow="hidden"><g style="fill:none;stroke:#141414;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round"><rect x="20" y="8" width="24" height="48" rx="4"></rect><circle cx="32" cy="50" r="2"></circle><path d="M28 12 H36"></path></g></svg></g><g data-name="Face" data-symbol="face" id="sym-face-1" data-cx="32" data-cy="32" data-tx="64.20567321777344" data-ty="218.00978088378906" data-rot="7.599601332536926" data-sx="3.6194032430648804" data-sy="6.277462959289551" data-rx="-11.396454620361329" data-ry="64.0044448852539" transform="translate(96.20567321777344 250.00978088378906) rotate(7.599601332536926) skewX(7.6805333862304686) scale(1.5863895771189913 6.153692755041241) translate(-32 -32)" class=""><svg width="64" height="64" viewBox="0 0 64 64" overflow="hidden"><g transform="translate(2.5403610678280124 -5.088235294117645) scale(0.19117647058823528)">
+    <!-- Hair outline -->
+    <path d="M 90 180 C 75 140 85 90 120 70 C 160 50 215 55 240 85 C 265 115 260 160 250 185" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="M 120 70 C 135 100 160 115 195 118 C 220 120 240 105 245 95" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    
+    <!-- Forehead, nose, lips, chin, jawline in 3/4 angled down profile -->
+    <path d="M 175 115 C 185 135 190 150 192 165 L 202 185 L 188 190 C 185 198 188 205 193 207 C 185 212 180 220 184 228 C 186 232 182 238 174 242 C 158 248 135 235 125 210 L 120 190" fill="none" stroke="#000000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Eye angled downward -->
+    <path d="M 160 152 Q 172 150 180 158" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+    <path d="M 165 158 Q 173 162 178 159" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    <circle cx="172" cy="157" r="2.2" fill="#000000"></circle>
+    <!-- Eyebrow tilted with attention -->
+    <path d="M 158 142 Q 170 138 184 145" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+
+    <!-- Ear -->
+    <path d="M 118 175 C 112 170 108 175 108 185 C 108 198 114 205 122 202" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    <path d="M 114 182 Q 112 190 116 193" fill="none" stroke="#000000" stroke-width="1.8" stroke-linecap="round"></path>
+
+    <!-- Neck and shoulders -->
+    <path d="M 132 238 L 130 280 C 120 295 85 315 50 330" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+    <path d="M 165 245 Q 175 270 190 290" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+  </g></svg></g></svg>

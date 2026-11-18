@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fast preview</title>
+    <link rel="stylesheet" href="/sd/style.css?v=embed3" />
+  </head>
+  <body class="embed">
+    <div id="phone">
+      <div class="bezel">
+        <div class="screen">
+          <div class="fit">
+            <div id="sheet" data-mode="open">
+              <header class="bar">
+                <button id="back" class="ibtn" type="button" aria-label="Back">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+                </button>
+                <div class="bar-title"><b id="bar-title">Pick a photo</b><span id="bar-sub"></span></div>
+                <button class="ibtn" type="button" aria-label="More">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg>
+                </button>
+              </header>
+              <div id="photo">
+                <img id="photo-under" alt="" hidden />
+                <div id="stage" class="stage">
+                  <p id="empty">Choose a photo, or start empty.</p>
+                </div>
+                <div id="gizmo" hidden>
+                  <div class="gizmo-box">
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="nw" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="ne" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="sw" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-handle" data-op="scale" data-corner="se" aria-label="Resize"></button>
+                    <button type="button" class="gizmo-edge" data-op="scale" data-edge="n" aria-label="Height"></button>
+                    <button type="button" class="gizmo-edge" data-op="scale" data-edge="s" aria-label="Height"></button>
+                    <button type="button" class="gizmo-edge" data-op="scale" data-edge="w" aria-label="Width"></button>
+                    <button type="button" class="gizmo-edge" data-op="scale" data-edge="e" aria-label="Width"></button>
+                    <button type="button" class="gizmo-rot" data-op="rotate" aria-label="Rotate"></button>
+                    <button type="button" class="gizmo-close" aria-label="Close sketch">×</button>
+                    <button type="button" class="gizmo-3d" data-op="orbit" aria-label="Spin 3D">3D</button>
+                    <div class="gizmo-cube" aria-hidden="true">
+                      <i class="cf"></i><i class="cb"></i><i class="cl"></i><i class="cr"></i><i class="ct"></i><i class="cu"></i>
+                    </div>
+                  </div>
+                </div>
+                <img id="photo-out" alt="Nano Banana photograph" hidden />
+                <div id="edit-bar" hidden>
+                  <button type="button" id="undo" disabled>Undo</button>
+                  <button type="button" id="redo" disabled>Redo</button>
+                  <button type="button" id="delete-obj" disabled>Close</button>
+                </div>
+                <div id="busy" hidden>
+                  <span class="spin"></span>
+                  <p id="busy-copy">Sketching</p>
+                </div>
+                <div id="lib" hidden>
+                  <div class="lib-head">
+                    <div class="lib-cats" id="lib-cats"></div>
+                    <button type="button" id="lib-close" aria-label="Close symbols">×</button>
+                  </div>
+                  <div class="lib-grid" id="lib-grid"></div>
+                </div>
+              </div>
+              <div id="open-panel">
+                <div id="picker" class="browse">
+                  <div class="caption">
+                    <span id="shot-count">Recents</span>
+                    <span id="shot-label">Photo or empty</span>
+                  </div>
+                  <div class="thumbs" id="thumbs"></div>
+                </div>
+                <div id="work" class="browse">
+                  <div class="prompt-wrap">
+                    <div id="prompt-mark" class="prompt-mark" aria-hidden="true"></div>
+                    <textarea id="prompt" rows="2" maxlength="280" placeholder="Type dog, cat, bird…"></textarea>
+                  </div>
+                  <div class="feature">
+                    <button id="lib-toggle" type="button">Symbols</button>
+                    <button id="sketch" type="button">Sketch</button>
+                    <button id="banana" type="button" disabled>Nano Banana</button>
+                  </div>
+                </div>
+              </div>
+              <input id="file" type="file" accept="image/*" hidden />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/sd/main.js?v=symbols27"></script>
+  </body>
+</html>

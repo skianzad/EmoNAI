@@ -159,7 +159,7 @@ async function readBody(req) {
 
 function sketchPrompt(concept) {
   return [
-    "You are SketchDirector. Produce one multi-object line sketch as SVG for this scene:",
+    "You are SketchDirector. Produce one comic-book / storyboard panel as SVG:",
     concept,
     "",
     "Rules:",
@@ -176,18 +176,18 @@ function sketchPrompt(concept) {
 
 function bananaPrompt(concept) {
   return [
-    "Turn this black-and-white line sketch into a photoreal photograph.",
-    `Scene: ${concept}`,
-    "Keep the same composition, camera, object count, and placement.",
-    "Natural lighting, real materials, no cartoon look, no extra objects, no text.",
-    "Return only the photograph.",
+    "Turn this black-and-white panel sketch into a finished story or comic-book frame.",
+    `Beat: ${concept}`,
+    "Keep the same composition, camera, character count, and placement.",
+    "Cinematic or illustrated, consistent characters, no extra objects, no text, no speech balloons.",
+    "Return only the finished panel.",
   ].join(" ");
 }
 
 function overlayPrompt(concept) {
   return [
-    "You are SketchDirector. The image is a real photograph.",
-    concept ? `Intended edit: ${concept}` : "Mark the main objects so they can be rearranged.",
+    "You are SketchDirector. The image is a still from a story.",
+    concept ? `Next beat: ${concept}` : "Mark the main characters and props so they can be restaged.",
     "Draw an SVG overlay aligned to this photo, viewBox 0 0 390 520.",
     "No background rectangle. Transparent canvas.",
     "Black or #1a2610 strokes, stroke-width 2.2, fill=none.",
@@ -200,11 +200,11 @@ function overlayPrompt(concept) {
 
 function bananaEditPrompt(edit) {
   return [
-    "The first image is the original photograph.",
-    "The second image is the same photo with a sketch overlay of the intended edit and object placement.",
-    `Apply this edit: ${edit || "Follow the sketch overlay."}`,
-    "Keep it photoreal. Same people and setting unless the edit says otherwise. No text, no extra objects.",
-    "Return only the edited photograph.",
+    "The first image is a still from the story.",
+    "The second image is that still with a sketch overlay of the next story beat.",
+    `Apply this beat: ${edit || "Follow the sketch overlay."}`,
+    "Keep the same characters unless the beat says otherwise. Cinematic or comic-book, no text, no extra objects.",
+    "Return only the finished panel.",
   ].join(" ");
 }
 

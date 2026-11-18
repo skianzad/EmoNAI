@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 520" data-bound="1"><g data-name="Face" data-symbol="face" id="sym-face-1" data-rot="0" data-sx="4.213069090145834" data-sy="5.918330571346199" data-fitted="1" data-cx="21.90081787109375" data-cy="28.000003814697266" data-rx="-19.14094390869141" data-ry="-43.13197784423828" transform="translate(45.97467613220215 208.9922332763672) rotate(0) skewX(-12.07695379638672) scale(3.0746169945507567 5.591134712999445) translate(-21.90081787109375 -28.000003814697266)" data-tx="24.0738582611084" data-ty="180.99222946166992" class=""><svg width="43.8016357421875" height="56.00000762939453" viewBox="10.099185943603516 4.000000953674316 43.8016357421875 56.00000762939453" overflow="visible"><g transform="translate(2.5403610678280124 -5.088235294117645) scale(0.19117647058823528)">
+    <!-- Hair outline -->
+    <path d="M 90 180 C 75 140 85 90 120 70 C 160 50 215 55 240 85 C 265 115 260 160 250 185" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="M 120 70 C 135 100 160 115 195 118 C 220 120 240 105 245 95" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    
+    <!-- Forehead, nose, lips, chin, jawline in 3/4 angled down profile -->
+    <path d="M 175 115 C 185 135 190 150 192 165 L 202 185 L 188 190 C 185 198 188 205 193 207 C 185 212 180 220 184 228 C 186 232 182 238 174 242 C 158 248 135 235 125 210 L 120 190" fill="none" stroke="#000000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+    
+    <!-- Eye angled downward -->
+    <path d="M 160 152 Q 172 150 180 158" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+    <path d="M 165 158 Q 173 162 178 159" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    <circle cx="172" cy="157" r="2.2" fill="#000000"></circle>
+    <!-- Eyebrow tilted with attention -->
+    <path d="M 158 142 Q 170 138 184 145" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+
+    <!-- Ear -->
+    <path d="M 118 175 C 112 170 108 175 108 185 C 108 198 114 205 122 202" fill="none" stroke="#000000" stroke-width="2.0" stroke-linecap="round"></path>
+    <path d="M 114 182 Q 112 190 116 193" fill="none" stroke="#000000" stroke-width="1.8" stroke-linecap="round"></path>
+
+    <!-- Neck and shoulders -->
+    <path d="M 132 238 L 130 280 C 120 295 85 315 50 330" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+    <path d="M 165 245 Q 175 270 190 290" fill="none" stroke="#000000" stroke-width="2.2" stroke-linecap="round"></path>
+  </g></svg></g><g data-name="Phone" data-symbol="phone" id="sym-phone-1" data-rot="0" data-sx="2.0307692307692307" data-sy="2.0307692307692307" data-fitted="1" data-cx="14" data-cy="26" data-rx="14.791497802734375" data-ry="-90.51898498535155" transform="translate(196.46490478515625 257.7950744628906) rotate(0) skewX(-25.345315795898436) scale(-0.8529230769230769 1.9634721457598185) translate(-14 -26)" data-tx="182.46490478515625" data-ty="231.79507446289062" class=""><svg width="28" height="52" viewBox="18 6 28 52" overflow="visible"><g style="fill:none;stroke:#141414;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round"><rect x="20" y="8" width="24" height="48" rx="4"></rect><circle cx="32" cy="50" r="2"></circle><path d="M28 12 H36"></path></g></svg></g></svg>

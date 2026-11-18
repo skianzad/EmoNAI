@@ -6,9 +6,11 @@ import type { EditorId } from "@/data/editors";
 import { objectsFromPaint, renderColorObjects, type ColorObject, type NamedColor } from "@/lib/colorAdjust";
 import { fitImage, readDataUrl } from "@/lib/shrink";
 import { splitIslands } from "@/lib/splitIslands";
+import { useLang } from "@/lib/i18n";
 import type { EditorChoice } from "./Menu";
 
 export function ColorObjects() {
+  const { t } = useLang();
   const [enabled, setEnabled] = useState(true);
   const [original, setOriginal] = useState(handbag.original);
   const [painted, setPainted] = useState<string | null>(null);
@@ -31,8 +33,8 @@ export function ColorObjects() {
           return list.find((item) => item.ready)?.id ?? current;
         });
       })
-      .catch(() => setStatus("Could not load editors."));
-  }, []);
+      .catch(() => setStatus(t.couldNotLoadEditors));
+  }, [t]);
 
   useEffect(() => {
     if (!enabled || objects.length === 0) {
@@ -45,7 +47,7 @@ export function ColorObjects() {
         if (!cancel) setPreview(url);
       })
       .catch((error) => {
-        if (!cancel) setStatus(error instanceof Error ? error.message : "Could not draw the objects");
+        if (!cancel) setStatus(error instanceof Error ? error.message : t.drawFailed);
       });
     return () => {
       cancel = true;
@@ -54,7 +56,7 @@ export function ColorObjects() {
 
   async function mapObjects() {
     setBusy(true);
-    setStatus("Coloring each object with a color that is not in the photo…");
+      setStatus(t.coloring);
     setShowPainted(false);
     try {
       const blob = await fitImage(await fetch(original).then((response) => response.blob()));
@@ -69,17 +71,17 @@ export function ColorObjects() {
           mime: head.slice(5, head.indexOf(";")) || "image/jpeg",
         }),
       });
-      const body = await response.json().catch(() => ({ error: "Edit failed" }));
-      if (!response.ok) throw new Error(body.error || "Edit failed");
+      const body = await response.json().catch(() => ({ error: t.editFailed }));
+      if (!response.ok) throw new Error(body.error || t.editFailed);
       const nextPainted = String(body.image ?? "");
       const named = Array.isArray(body.items) ? (body.items as NamedColor[]) : [];
       const split = await splitIslands(dataUrl, nextPainted);
       const next = await objectsFromPaint(nextPainted, split.islands, named);
       setPainted(nextPainted);
       setObjects(next);
-      setStatus(next.length === 0 ? "No separate objects found." : `${next.length} objects`);
+      setStatus(next.length === 0 ? t.noObjects : t.objectCount(next.length));
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Edit failed");
+      setStatus(error instanceof Error ? error.message : t.editFailed);
     } finally {
       setBusy(false);
     }
@@ -105,18 +107,18 @@ export function ColorObjects() {
   return (
     <div className="editor">
       <div className="title-block">
-        <h1 className="title">Color objects</h1>
-        <p className="subtitle">First prompt paints each object a new color</p>
+        <h1 className="title">{t.colorTitle}</h1>
+        <p className="subtitle">{t.colorSubtitle}</p>
       </div>
 
       <label className="cmap-toggle">
-        <span>Color objects</span>
+        <span>{t.colorToggle}</span>
         <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
       </label>
 
       {enabled ? (
         <label className="setting">
-          <span className="setting-label">Editor</span>
+          <span className="setting-label">{t.editor}</span>
           <select
             className="editor-select"
             value={editorId}
@@ -124,7 +126,7 @@ export function ColorObjects() {
           >
             {editors.map((editor) => (
               <option key={editor.id} value={editor.id} disabled={!editor.ready}>
-                {editor.ready ? editor.name : `${editor.name} — No key`}
+                {editor.ready ? editor.name : t.noKey(editor.name)}
               </option>
             ))}
           </select>
@@ -139,11 +141,11 @@ export function ColorObjects() {
         <div className="sheet">
           <div className="upload-row">
             <button type="button" className="upload-btn" disabled={busy} onClick={() => void mapObjects()}>
-              {busy ? "Coloring…" : "Color the objects"}
+              {busy ? t.coloring : t.colorObjects}
             </button>
           </div>
           <label className="upload-btn cmap-file">
-            Upload a photo
+            {t.upload}
             <input
               type="file"
               accept="image/*"
@@ -157,12 +159,11 @@ export function ColorObjects() {
           </label>
           {painted ? (
             <button type="button" className="cmap-text" onClick={() => setShowPainted((on) => !on)}>
-              {showPainted ? "Show adjustments" : "Show the AI color map"}
+              {showPainted ? t.showAdjust : t.showMap}
             </button>
           ) : (
             <p className="hint">
-              The model paints every important object a flat color that is not already in the photo, and returns the list.
-              Then change a color or a size here, without another prompt.
+              {t.colorHint}
             </p>
           )}
           <ul className="cmap-list">
@@ -170,7 +171,7 @@ export function ColorObjects() {
               <li key={object.id} className="cmap-row">
                 <span className="cmap-name">{object.name}</span>
                 <label className="cmap-size">
-                  Color
+                  {t.colorLabel}
                   <input
                     type="color"
                     value={toPicker(object.color)}
@@ -179,7 +180,7 @@ export function ColorObjects() {
                   />
                 </label>
                 <label className="cmap-size">
-                  Size
+                  {t.sizeLabel}
                   <input
                     type="range"
                     min={40}
@@ -197,7 +198,7 @@ export function ColorObjects() {
           {status ? <p className="status">{status}</p> : null}
         </div>
       ) : (
-        <p className="hint">Turn this on to ask the model for a color map of the photo.</p>
+        <p className="hint">{t.colorHintOff}</p>
       )}
     </div>
   );

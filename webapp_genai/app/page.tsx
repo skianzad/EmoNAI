@@ -1,18 +1,11 @@
 "use client";
 
-import { AiEditApp } from "@/components/ai-edit/AiEditApp";
-import { Phone } from "@/components/Phone";
+import { Approaches } from "@/components/Approaches";
 
 export default function Page() {
   return (
     <main className="stage">
-      <Phone>
-        <AiEditApp />
-      </Phone>
-      <p className="caption">
-        AI Edit
-        <span>HMI Lab</span>
-      </p>
+      <Approaches />
     </main>
   );
 }
